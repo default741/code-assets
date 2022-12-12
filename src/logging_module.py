@@ -1,4 +1,4 @@
-# Custom Logging Module Asset to be Used for any Future Projects - v0.2
+# Custom Logging Module Asset to be Used for any Future Projects - v0.0.2
 
 # Author: Abdemanaaf Ghadiali
 # Copyright: Copyright 2022, Logging_Module, https://HowToBeBoring.com
