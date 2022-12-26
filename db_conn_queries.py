@@ -18,9 +18,10 @@ class DB_Table_Ops:
 
     def __init__(
         self, engine_type: str = 'mssql+pyodbc', driver: str = 'ODBC Driver 17 for SQL Server',
-        host: str = 'localhost', port: str = '3306', database: str = 'db', username: str = None, password: str = None
+        host: str = 'localhost', port: str = '1433', database: str = 'db', username: str = None, password: str = None
     ) -> None:
 
+        self.database_type = engine_type.split('+')[0]
         connection_url = None
 
         if driver is not None:
@@ -42,16 +43,18 @@ class DB_Table_Ops:
         if table_name is None or not isinstance(table_name, str):
             raise ValueError('Table Name not Valid.')
 
-        query_string = f'''SELECT schema_name(t.schema_id) AS schema_names, t.name AS table_names
-                FROM {table_name}.tables t
-                ORDER BY schema_names, table_names;'''
-
-        query_string = '''show tables;'''
+        query_string = {
+            'mysql': '''SHOW TABLES;''',
+            'mssql': '''SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE';''',
+            'postgresql': '''SELECT relname FROM pg_catalog.pg_class WHERE relkind = 'r';'''
+        }
 
         with self.engine.connect() as conn:
-            cursor = conn.execute(sqlalchemy.text(query_string))
-            table_exists = [
-                table for table in cursor if table_name == table[1]]
+            cursor = conn.execute(sqlalchemy.text(
+                query_string[self.database_type]))
+
+            table_exists = [table[0]
+                            for table in cursor if table_name == table[0]]
 
             return bool(table_exists)
 
@@ -64,6 +67,9 @@ class DB_Table_Ops:
         if not self.table_exists(table_name):
             with self.engine.connect() as conn:
                 conn.execute(sqlalchemy.text(create_schema_string))
+
+        else:
+            print('Table Already Exist!')
 
     def drop_table(self, table_name: str = None) -> None:
         if table_name is None or not isinstance(table_name, str):
@@ -114,11 +120,20 @@ class DB_Table_Ops:
 
 if __name__ == '__main__':
 
-    dbops = DB_Table_Ops(engine_type='mysql+mysqlconnector',
+    dbops = DB_Table_Ops(engine_type='mysql+mysqlconnector', port=3306,
                          username='root', password='root', driver=None, database='mydb')
 
-    dbops.create_table('''CREATE TABLE users (
+    dbops.create_table('''CREATE TABLE users1 (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL
-);''')
+    );''')
+
+    dbops2 = DB_Table_Ops(
+        username='SA', password='Abde@1998', database='dev-test-db')
+
+    dbops2.create_table('''CREATE TABLE employees (
+        employee_id INT PRIMARY KEY,
+        first_name VARCHAR(50),
+        last_name VARCHAR(50)
+        );''')
