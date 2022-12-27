@@ -9,56 +9,81 @@
 # MyPy Status: NA (Not Tested)
 
 import pandas as pd
-import sqlalchemy
 
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 
 
 class DB_Table_Ops:
+    """Database Quering Class with generic functions for MySQL, MSSQL and PostgreSQL.
+
+    Methods:
+        __init__: Class Initialization Method
+        table_exists: Checks whether a table exist or not
+        create_table_using_query: Creates new Table using a CREATE TABLE Query.
+        create_table_using_orm: Creates new Table using ORM Classes.
+    """
 
     def __init__(
         self, engine_type: str = 'mssql+pyodbc', driver: str = 'ODBC Driver 17 for SQL Server',
         host: str = 'localhost', port: str = '1433', database: str = 'db', username: str = None, password: str = None
     ) -> None:
+        """Class Initialization Method for creating the SQL Connection Engine.
+
+        Args:
+            engine_type (str, optional): Engine for Specific SQL Type. Defaults to 'mssql+pyodbc'.
+            driver (str, optional): Connection Driver. Defaults to 'ODBC Driver 17 for SQL Server'.
+            host (str, optional): Server Name where the SQL Server is Hosted. Defaults to 'localhost'.
+            port (str, optional): Port Number to SQL Connection. Defaults to '1433'.
+            database (str, optional): Database Name. Defaults to 'db'.
+            username (str, optional): Username. Defaults to None.
+            password (str, optional): User Password. Defaults to None.
+        """
 
         self.database_type = engine_type.split('+')[0]
-        connection_url = None
+        self.engine = None
 
+        # When the Driver is not Provided.
         if driver is not None:
-            connection_url = URL.create(
-                engine_type, username=username, password=password, host=host, port=port,
-                database=database, query=dict(
-                    driver=driver)
-            )
+            self.engine = create_engine(URL.create(engine_type, username=username, password=password,
+                                        host=host, port=port, database=database, query=dict(driver=driver)))
 
         else:
-            connection_url = URL.create(
-                engine_type, username=username, password=password, host=host, port=port,
-                database=database
-            )
-
-        self.engine = sqlalchemy.create_engine(connection_url)
+            self.engine = create_engine(URL.create(
+                engine_type, username=username, password=password, host=host, port=port, database=database))
 
     def table_exists(self, table_name: str = None) -> bool:
+        """Check whether a specified table exists or not.
+
+        Args:
+            table_name (str, optional): Table Name to check its existance in the Database. Defaults to None.
+
+        Raises:
+            ValueError: Table Name is either None or not a valid String object.
+
+        Returns:
+            bool: True or False based on the table existance.
+        """
+
         if table_name is None or not isinstance(table_name, str):
-            raise ValueError('Table Name not Valid.')
+            raise ValueError(
+                'Table Name is either None or not a valid String object.')
 
         query_string = {
-            'mysql': '''SHOW TABLES;''',
-            'mssql': '''SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE';''',
-            'postgresql': '''SELECT relname FROM pg_catalog.pg_class WHERE relkind = 'r';'''
+            'mysql': 'SHOW TABLES;',
+            'mssql': 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = \'BASE TABLE\';',
+            'postgresql': 'SELECT relname FROM pg_catalog.pg_class WHERE relkind = \'r\';'
         }
 
         with self.engine.connect() as conn:
-            cursor = conn.execute(sqlalchemy.text(
-                query_string[self.database_type]))
+            cursor = conn.execute(text(query_string[self.database_type]))
 
             table_exists = [table[0]
                             for table in cursor if table_name == table[0]]
 
             return bool(table_exists)
 
-    def create_table(self, create_schema_string: str = None) -> None:
+    def create_table_using_query(self, create_schema_string: str = None) -> None:
         if create_schema_string is None or not isinstance(create_schema_string, str):
             raise ValueError('Schema String Not Valid.')
 
@@ -66,7 +91,23 @@ class DB_Table_Ops:
 
         if not self.table_exists(table_name):
             with self.engine.connect() as conn:
-                conn.execute(sqlalchemy.text(create_schema_string))
+                conn.execute(text(create_schema_string))
+
+        else:
+            print('Table Already Exist!')
+
+    def create_table_using_orm(self, base_object: object = None, table_object: str = None) -> None:
+        if base_object is None:
+            raise ValueError('Base ORM Class cannot be None.')
+
+        table_name = table_object.__tablename__
+
+        if table_name is None:
+            raise ValueError('Table Name cannot be None.')
+
+        if not self.table_exists(table_name):
+            base_object.metadata.create_all(
+                self.engine, [table_object.__table__])
 
         else:
             print('Table Already Exist!')
@@ -79,7 +120,7 @@ class DB_Table_Ops:
             sql_comm = f'''DROP TABLE {table_name}'''
 
             with self.engine.connect() as conn:
-                conn.execute(sqlalchemy.text(sql_comm))
+                conn.execute(text(sql_comm))
 
     def insert_df_to_table(self, dataframe: pd.DataFrame, table_name: str = None) -> None:
         if table_name is None or not isinstance(table_name, str):
@@ -111,7 +152,7 @@ class DB_Table_Ops:
 
     def general_sql_command(self, sql_comm):
         with self.engine.connect() as conn:
-            cursor = conn.execute(sqlalchemy.text(sql_comm))
+            cursor = conn.execute(text(sql_comm))
             try:
                 return [list(t) for t in cursor]
             except:
@@ -123,17 +164,26 @@ if __name__ == '__main__':
     dbops = DB_Table_Ops(engine_type='mysql+mysqlconnector', port=3306,
                          username='root', password='root', driver=None, database='mydb')
 
-    dbops.create_table('''CREATE TABLE users1 (
+    dbops.create_table_using_query('''CREATE TABLE users_query_mysql (
     id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL
     );''')
 
-    dbops2 = DB_Table_Ops(
-        username='SA', password='Abde@1998', database='dev-test-db')
+    # dbops2 = DB_Table_Ops(
+    #     username='SA', password='Abde@1998', database='dev-test-db')
 
-    dbops2.create_table('''CREATE TABLE employees (
-        employee_id INT PRIMARY KEY,
-        first_name VARCHAR(50),
-        last_name VARCHAR(50)
-        );''')
+    # dbops2.create_table_using_query('''CREATE TABLE employees (
+    #     employee_id INT PRIMARY KEY,
+    #     first_name VARCHAR(50),
+    #     last_name VARCHAR(50)
+    #     );''')
+
+    # dbops2 = DB_Table_Ops(engine_type='postgresql', port=5432,
+    #                       username='postgres', password='root', driver=None, database='test-db')
+
+    # dbops2.create_table_using_query('''CREATE TABLE users (
+    # id serial PRIMARY KEY,
+    # name VARCHAR(255) NOT NULL,
+    # email VARCHAR(255) NOT NULL
+    #     );''')
