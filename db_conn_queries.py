@@ -43,6 +43,12 @@ class DB_Table_Ops:
 
         self.database_type = engine_type.split('+')[0]
         self.database_name = database
+        self.show_table_query = {
+            'mysql': 'SHOW TABLES;',
+            'mssql': 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = \'BASE TABLE\';',
+            'postgresql': 'SELECT relname FROM pg_catalog.pg_class WHERE relkind = \'r\';'
+        }
+
         self.engine = None
 
         # When the Driver is not Provided.
@@ -71,14 +77,9 @@ class DB_Table_Ops:
             raise ValueError(
                 'Table Name is either None or not a valid String object.')
 
-        query_string = {
-            'mysql': 'SHOW TABLES;',
-            'mssql': 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = \'BASE TABLE\';',
-            'postgresql': 'SELECT relname FROM pg_catalog.pg_class WHERE relkind = \'r\';'
-        }
-
         with self.engine.connect() as conn:
-            cursor = conn.execute(text(query_string[self.database_type]))
+            cursor = conn.execute(
+                text(self.show_table_query[self.database_type]))
 
             table_exists = [table[0]
                             for table in cursor if table_name == table[0]]
@@ -92,14 +93,9 @@ class DB_Table_Ops:
             list: Table List.
         """
 
-        query_string = {
-            'mysql': 'SHOW TABLES;',
-            'mssql': 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = \'BASE TABLE\';',
-            'postgresql': 'SELECT relname FROM pg_catalog.pg_class WHERE relkind = \'r\';'
-        }
-
         with self.engine.connect() as conn:
-            cursor = conn.execute(text(query_string[self.database_type]))
+            cursor = conn.execute(
+                text(self.show_table_query[self.database_type]))
             table_list = [table[0] for table in cursor]
 
             print(f'Table List in Database ({self.database_name}): ')
