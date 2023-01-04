@@ -12,6 +12,7 @@ import pandas as pd
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
+from typing import Union
 
 
 class DB_Table_Ops:
@@ -41,6 +42,7 @@ class DB_Table_Ops:
         """
 
         self.database_type = engine_type.split('+')[0]
+        self.database_name = database
         self.engine = None
 
         # When the Driver is not Provided.
@@ -83,7 +85,40 @@ class DB_Table_Ops:
 
             return bool(table_exists)
 
+    def show_table_list(self) -> list:
+        """Shows A list of tables names in the Database. Also Returns the same list.
+
+        Returns:
+            list: Table List.
+        """
+
+        query_string = {
+            'mysql': 'SHOW TABLES;',
+            'mssql': 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = \'BASE TABLE\';',
+            'postgresql': 'SELECT relname FROM pg_catalog.pg_class WHERE relkind = \'r\';'
+        }
+
+        with self.engine.connect() as conn:
+            cursor = conn.execute(text(query_string[self.database_type]))
+            table_list = [table[0] for table in cursor]
+
+            print(f'Table List in Database ({self.database_name}): ')
+
+            for idx, table in enumerate(table_list):
+                print(f'{idx}. {table}')
+
+            return table_list
+
     def create_table_using_query(self, create_schema_string: str = None) -> None:
+        """Creates Table in Database using SQL Query. Need to Provide Schema Structure.
+
+        Args:
+            create_schema_string (str, optional): CREATE TABLE SQL Query Schema. Defaults to None.
+
+        Raises:
+            ValueError: Schema String not Valid
+        """
+
         if create_schema_string is None or not isinstance(create_schema_string, str):
             raise ValueError('Schema String Not Valid.')
 
@@ -96,41 +131,104 @@ class DB_Table_Ops:
         else:
             print('Table Already Exist!')
 
-    def create_table_using_orm(self, base_object: object = None, table_object: str = None) -> None:
+    def create_table_using_orm(self, base_object: object = None, table_object: Union[str, list] = None) -> None:
+        """Creates Table using Object Relationship Manager from SQLAlchemy Library.
+
+        Args:
+            base_object (object, optional): Base Object from SQLAlchemy. Defaults to None.
+            table_object (Union[str, list], optional): Table Class with columns Defined. Defaults to None.
+
+        Raises:
+            ValueError: Base ORM Class cannot be None.
+            ValueError: Table Name cannot be None.
+            ValueError: Table Name cannot be None.
+            ValueError: Table Object need to be either str or list.
+        """
+
         if base_object is None:
             raise ValueError('Base ORM Class cannot be None.')
 
-        table_name = table_object.__tablename__
+        if isinstance(table_object, str):
+            table_name = table_object.__tablename__
 
-        if table_name is None:
-            raise ValueError('Table Name cannot be None.')
+            if table_name is None:
+                raise ValueError('Table Name cannot be None.')
 
-        if not self.table_exists(table_name):
-            base_object.metadata.create_all(
-                self.engine, [table_object.__table__])
+            if not self.table_exists(table_name):
+                base_object.metadata.create_all(
+                    self.engine, [table_object.__table__])
+            else:
+                print('Table Already Exist!')
+
+        elif isinstance(table_object, list):
+            for table in table_object:
+                table_name = table.__tablename__
+
+                if table_name is None:
+                    raise ValueError('Table Name cannot be None.')
+
+                if not self.table_exists(table_name):
+                    base_object.metadata.create_all(
+                        self.engine, [table.__table__])
+                else:
+                    print('Table Already Exist!')
 
         else:
-            print('Table Already Exist!')
+            raise ValueError('Table Object need to be either str or list.')
 
-    def drop_table(self, table_name: str = None) -> None:
+    def delete_table(self, table_name: Union[str, list] = None) -> None:
+        """Deletes Table from Database.
+
+        Args:
+            table_name (Union[str, list], optional): Table Name in Database. Defaults to None.
+
+        Raises:
+            ValueError: Table Name (str or list) not Valid.
+            ValueError: Table Name Format Mismatch.
+        """
+
+        if table_name is None or not isinstance(table_name, (str, list)):
+            raise ValueError('Table Name (str or list) not Valid.')
+
+        if isinstance(table_name, str):
+            if self.table_exists(table_name):
+                sql_comm = f'''DROP TABLE {table_name}'''
+
+                with self.engine.connect() as conn:
+                    conn.execute(text(sql_comm))
+
+        elif isinstance(table_name, list):
+            for table in table_name:
+                if self.table_exists(table):
+                    sql_comm = f'''DROP TABLE {table}'''
+
+                    with self.engine.connect() as conn:
+                        conn.execute(text(sql_comm))
+
+        else:
+            raise ValueError('Table Name Format Mismatch.')
+
+    def insert_dataframe_to_table(self, dataframe: Union[pd.DataFrame, dict], table_name: str = None) -> None:
+        """Insert Pandas Dataframe to Database Table. Dataframe can be a dictionary, which will be converted to Dataframe.
+
+        Args:
+            dataframe (Union[pd.DataFrame, dict]): Data to be saved to Table.
+            table_name (str, optional): Table Name in Database. Defaults to None.
+
+        Raises:
+            ValueError: Table Name not Valid.
+            ValueError: Empty Dictionary.
+            ValueError: DataFrame is Empty.
+        """
+
         if table_name is None or not isinstance(table_name, str):
             raise ValueError('Table Name not Valid.')
 
-        if self.table_exists(table_name):
-            sql_comm = f'''DROP TABLE {table_name}'''
-
-            with self.engine.connect() as conn:
-                conn.execute(text(sql_comm))
-
-    def insert_df_to_table(self, dataframe: pd.DataFrame, table_name: str = None) -> None:
-        if table_name is None or not isinstance(table_name, str):
-            raise ValueError('Table Name not Valid.')
-
-        if type(dataframe) is dict:
+        if isinstance(dataframe, dict):
             if dataframe == {}:
-                raise ValueError('Enpty Dictionary.')
+                raise ValueError('Empty Dictionary.')
 
-            dataframe = pd.DataFrame(data=dataframe)
+            dataframe = pd.DataFrame(dataframe)
 
         if dataframe.empty:
             raise ValueError('DataFrame is Empty.')
@@ -138,13 +236,33 @@ class DB_Table_Ops:
         dataframe.to_sql(table_name, self.engine,
                          if_exists="append", index=False)
 
-    def query_to_df(self, query: str, index_col: str = 'ident', return_dictionary: bool = False) -> pd.DataFrame:
+    # TODO
+    def insert_rowto_table():
+        pass
+
+    def query_dataframe_from_table(
+        self, query: str, index_col: Union[str, list] = None, return_dictionary: bool = False
+    ) -> Union[pd.DataFrame, dict]:
+        """Reads Data into a Dataframe or Dictionary from Database Table.
+
+        Args:
+            query (str): SQL Query.
+            index_col (Union[str, list], optional): Column to be specified as index. Defaults to None.
+            return_dictionary (bool, optional): Whether to Return the data as dictionary. Defaults to False.
+
+        Raises:
+            ValueError: Schema String Not Valid.
+
+        Returns:
+            Union[pd.DataFrame, dict]: Data as a Pandas Dataframe or Dictionary.
+        """
+
         if query is None or not isinstance(query, str):
             raise ValueError('Schema String Not Valid.')
 
         with self.engine.connect() as conn:
             try:
-                df = pd.read_sql_query(query, conn, index_col=index_col)
+                df = pd.read_sql_query(query, self.engine, index_col=index_col)
             except Exception as E:
                 print(f'Error Reading Table: {E}')
 
