@@ -4,7 +4,7 @@ from statsmodels.tools.tools import add_constant
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.inspection import permutation_importance
-from sklearn.feature_selection import SelectFromModel, RFE
+from sklearn.feature_selection import SelectFromModel, RFE, mutual_info_classif
 from sklearn.linear_model import LogisticRegression, RidgeClassifier, ElasticNet
 
 from boruta import BorutaPy
@@ -128,7 +128,11 @@ class _Select_Methods:
     # TODO: Add Mutual Info Classif based FS
 
     @staticmethod
-    def _logit_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> pd.DataFrame:
+    def _mutual_info_classif_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
+        pass
+
+    @staticmethod
+    def _logit_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
         """Selection Feature Using Logit Model.
 
         Args:
@@ -139,7 +143,7 @@ class _Select_Methods:
             ValueError: All Features Dropped.
 
         Returns:
-            pd.DataFrame: Feature Selected DataFrame.
+            dict: Feature Selected DataFrame.
         """
 
         print(f'\tRunning Logit Feature Selection')
@@ -173,10 +177,10 @@ class _Select_Methods:
 
         data['target_label'] = target
 
-        return data
+        return {'logit': data.copy()}
 
     @staticmethod
-    def _permutation_impt_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> pd.DataFrame:
+    def _permutation_impt_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
         """Feature Selection Using Permutation Importance with Random Forest Model.
 
         Args:
@@ -184,7 +188,7 @@ class _Select_Methods:
             target (np.array): Target Data
 
         Returns:
-            pd.DataFrame: Feature Selected DataFrame.
+            dict: Feature Selected DataFrame.
         """
 
         print(f'\n\tRunning Permutation Importance Feature Selection')
@@ -460,9 +464,8 @@ class _Select_Methods:
 
         return boruta_impt_dict
 
-    # TODO
     @staticmethod
-    def _sequencial_forward_selection(data: pd.DataFrame, target: pd.DataFrame) -> pd.DataFrame:
+    def _sequencial_forward_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> pd.DataFrame:
         """Selection Feature Using Sequencial Forward Selection with Random Forest Model.
 
         Args:
@@ -476,28 +479,68 @@ class _Select_Methods:
 
         print(f'\n\tRunning Sequencial Forward Selection')
 
-        model = RandomForestClassifier(
-            random_state=0, n_jobs=-1).fit(data, target)
-        fs_model = sfs(model, k_features=25, verbose=1, forward=True,
-                       scoring='roc_auc', cv=5, n_jobs=-1).fit(data, target)
+        sfs_impt_dict = dict()
 
-        metrics = fs_model.get_metric_dict()
-        cur_max, itr = 0, 0
+        model_list = {
+            'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1).fit(data, target),
+            'gradient_boosting': GradientBoostingClassifier(random_state=0).fit(data, target)
+        }
 
-        for i in range(1, 26):
-            try:
-                if metrics[i]['avg_score'] > cur_max:
-                    cur_max, itr = metrics[i]['avg_score'], i
+        num_feat = 25 if 'num_feat' not in kwargs.key() else kwargs['num_feat']
 
-            except Exception as e:
-                print(f'\t\tException Was Raised: {e}')
+        if 'model_list' in kwargs:
+            models = (kwargs['model_list'] if kwargs['model_list']
+                      [0].lower() != 'all' else model_list.keys())
 
-        selected_feat_fs = list(metrics[itr]['feature_names'])
+            for model_type in models:
+                model = model_list[model_type]
 
-        data = data[list(selected_feat_fs)]
-        data['target_label'] = target
+                fs_model = sfs(model, k_features=num_feat, verbose=1, forward=True,
+                               scoring='roc_auc', cv=5, n_jobs=-1).fit(data, target)
 
-        return data
+                metrics = fs_model.get_metric_dict()
+                cur_max, itr = 0, 0
+
+                for i in range(1, num_feat + 1):
+                    try:
+                        if metrics[i]['avg_score'] > cur_max:
+                            cur_max, itr = metrics[i]['avg_score'], i
+
+                    except Exception as e:
+                        print(f'Exception Was Raised: {e}')
+
+                feat_list = list(metrics[itr]['feature_names'])
+
+                data = data[list(feat_list)]
+                data['target_label'] = target
+
+                sfs_impt_dict[model_type] = data.copy()
+
+        else:
+            model = RandomForestClassifier(
+                random_state=0, n_jobs=-1).fit(data, target)
+            fs_model = sfs(model, k_features=num_feat, verbose=1, forward=True,
+                           scoring='roc_auc', cv=5, n_jobs=-1).fit(data, target)
+
+            metrics = fs_model.get_metric_dict()
+            cur_max, itr = 0, 0
+
+            for i in range(1, num_feat + 1):
+                try:
+                    if metrics[i]['avg_score'] > cur_max:
+                        cur_max, itr = metrics[i]['avg_score'], i
+
+                except Exception as e:
+                    print(f'Exception Was Raised: {e}')
+
+            feat_list = list(metrics[itr]['feature_names'])
+
+            data = data[list(feat_list)]
+            data['target_label'] = target
+
+            sfs_impt_dict['random_forest'] = data.copy()
+
+        return sfs_impt_dict
 
 
 class FeatureSelection:
@@ -632,6 +675,9 @@ class FeatureSelection:
             if method_name in self._selection_methods.keys():
                 feat_dict[method_name] = self._selection_methods[method_name](
                     data.copy(), target, **select_method['params'])
+
+            else:
+                raise TypeError('Invalid Feature Selection Method.')
 
         return feat_dict
 
