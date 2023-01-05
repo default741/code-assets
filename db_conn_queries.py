@@ -10,30 +10,44 @@
 
 import pandas as pd
 
+import sqlparse
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 from typing import Union
+
+
+class InvalidTableName(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class InvalidSQLQuery(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
 
 
 class DB_Table_Ops:
     """Database Quering Class with generic functions for MySQL, MSSQL and PostgreSQL.
 
     Methods:
-        __init__: Class Initialization Method
-        table_exists: Checks whether a table exist or not
+        __init__: Class Initialization Method. (Creates Engine Connection.)
+        is_valid_sql (staticmethod): Checks whether SQL Query is Valid or Not.
+        table_exists: Checks whether a table exist or not.
         create_table_using_query: Creates new Table using a CREATE TABLE Query.
         create_table_using_orm: Creates new Table using ORM Classes.
+
     """
 
     def __init__(
         self, engine_type: str = 'mssql+pyodbc', driver: str = 'ODBC Driver 17 for SQL Server',
         host: str = 'localhost', port: str = '1433', database: str = 'db', username: str = None, password: str = None
     ) -> None:
-        """Class Initialization Method for creating the SQL Connection Engine.
+        """Class Initialization Method for creating the SQL Connection Engine. Also Tests out the created Engine Connection.
 
         Args:
             engine_type (str, optional): Engine for Specific SQL Type. Defaults to 'mssql+pyodbc'.
-            driver (str, optional): Connection Driver. Defaults to 'ODBC Driver 17 for SQL Server'.
+            driver (str, optional): SQL Connection Driver. Defaults to 'ODBC Driver 17 for SQL Server'.
             host (str, optional): Server Name where the SQL Server is Hosted. Defaults to 'localhost'.
             port (str, optional): Port Number to SQL Connection. Defaults to '1433'.
             database (str, optional): Database Name. Defaults to 'db'.
@@ -41,6 +55,7 @@ class DB_Table_Ops:
             password (str, optional): User Password. Defaults to None.
         """
 
+        # Get the type of SQL Connection we are working with.
         self.database_type = engine_type.split('+')[0]
         self.database_name = database
         self.show_table_query = {
@@ -60,24 +75,59 @@ class DB_Table_Ops:
             self.engine = create_engine(URL.create(
                 engine_type, username=username, password=password, host=host, port=port, database=database))
 
+        print('Database Engine Connection String Created.')
+
+        # Tests Database Connection.
+        try:
+            connection = self.engine.connect()
+            print('Database Connection Established and Working.')
+
+        except Exception as E:
+            print('Error while connecting to database. {E}')
+
+        finally:
+            connection.close()
+
+    @staticmethod
+    def is_valid_sql(query: str, **kwargs) -> bool:
+        """Checks whether the input SQL Query is Valid or Not. Uses SQLParse Library for Parsing SQL Queries.
+
+        Args:
+            query (str): SQL Query String
+
+        Raises:
+            sqlparse.exceptions.SQLParseError: If SQL Query is not Valid.
+
+        Returns:
+            bool: True if Valid SQL Query else False.
+        """
+
+        try:
+            sqlparse.parse(query, **kwargs)
+            return True
+
+        except sqlparse.exceptions.SQLParseError:
+            return False
+
     def table_exists(self, table_name: str = None) -> bool:
-        """Check whether a specified table exists or not.
+        """Check whether a Specified Table Exists in the Database or Not.
 
         Args:
             table_name (str, optional): Table Name to check its existance in the Database. Defaults to None.
 
         Raises:
-            ValueError: Table Name is either None or not a valid String object.
+            InvalidTableName: Table Name is either None or not a valid String object.
 
         Returns:
-            bool: True or False based on the table existance.
+            bool: True if Table Exists in the Database else False.
         """
 
         if table_name is None or not isinstance(table_name, str):
-            raise ValueError(
+            raise InvalidTableName(
                 'Table Name is either None or not a valid String object.')
 
         with self.engine.connect() as conn:
+            # Check if Table Exist in Database based on the Type of Database Engine is connect.
             cursor = conn.execute(
                 text(self.show_table_query[self.database_type]))
 
@@ -87,7 +137,7 @@ class DB_Table_Ops:
             return bool(table_exists)
 
     def show_table_list(self) -> list:
-        """Shows A list of tables names in the Database. Also Returns the same list.
+        """Shows a List of Tables in the Database. Also Returns the Same list.
 
         Returns:
             list: Table List.
@@ -112,11 +162,17 @@ class DB_Table_Ops:
             create_schema_string (str, optional): CREATE TABLE SQL Query Schema. Defaults to None.
 
         Raises:
-            ValueError: Schema String not Valid
+            InvalidSQLQuery: SQL Schema String is either None or not a Valid String.
+            InvalidSQLQuery: SQL Schema String is not a Valid SQL Query.
         """
 
         if create_schema_string is None or not isinstance(create_schema_string, str):
-            raise ValueError('Schema String Not Valid.')
+            raise InvalidSQLQuery(
+                'SQL Schema String is either None or not a Valid String.')
+
+        if not DB_Table_Ops.is_valid_sql(create_schema_string):
+            raise InvalidSQLQuery(
+                'SQL Schema String is not a Valid SQL Query.')
 
         table_name = create_schema_string.split()[2]
 
@@ -125,7 +181,7 @@ class DB_Table_Ops:
                 conn.execute(text(create_schema_string))
 
         else:
-            print('Table Already Exist!')
+            print(f'Table Already Exist in Database {self.database_name}!')
 
     def create_table_using_orm(self, base_object: object = None, table_object: Union[str, list] = None) -> None:
         """Creates Table using Object Relationship Manager from SQLAlchemy Library.
@@ -232,9 +288,32 @@ class DB_Table_Ops:
         dataframe.to_sql(table_name, self.engine,
                          if_exists="append", index=False)
 
-    # TODO
-    def insert_rowto_table():
-        pass
+    def insert_row_to_table(self, table_name: str, column_list: list, value_list: list) -> None:
+        """Insert Single Row to Table in Database.
+
+        Args:
+            table_name (str): Table Name in DataBase
+            column_list (list): List of Column Names in the Table
+            value_list (list): Values for each Column
+
+        Raises:
+            ValueError: Columns and Values should be a list.
+            ValueError: Length of Column List and Value List should be Equal.
+        """
+
+        if not isinstance(column_list, list) and not isinstance(value_list, list):
+            raise ValueError('Columns and Values should be a list.')
+
+        if len(column_list) != len(value_list):
+            raise ValueError(
+                'Length of Column List and Value List should be Equal.')
+
+        sql_query = f'''INSERT INTO {table_name} ({", ".join(column_list)})
+                        VALUES ({", ".join(value_list)});'''
+
+        if not self.table_exists(table_name):
+            with self.engine.connect() as conn:
+                conn.execute(text(sql_query))
 
     def query_dataframe_from_table(
         self, query: str, index_col: Union[str, list] = None, return_dictionary: bool = False
@@ -256,21 +335,34 @@ class DB_Table_Ops:
         if query is None or not isinstance(query, str):
             raise ValueError('Schema String Not Valid.')
 
-        with self.engine.connect() as conn:
-            try:
-                df = pd.read_sql_query(query, self.engine, index_col=index_col)
-            except Exception as E:
-                print(f'Error Reading Table: {E}')
+        try:
+            df = pd.read_sql_query(query, con=self.engine, index_col=index_col)
+        except Exception as E:
+            print(f'Error Reading Table: {E}')
 
-            return df.to_dict() if return_dictionary else df
+        return df.to_dict() if return_dictionary else df
 
-    def general_sql_command(self, sql_comm):
+    def run_general_sql_commands(self, sql_query: str) -> list:
+        """Execute General SQL Queries for one or many Table in Database.
+
+        Args:
+            sql_query (str): SQL Query String.
+
+        Raises:
+            ValueError: Cursor is of Ambigous Nature.
+
+        Returns:
+            list: Output rows from the Query.
+        """
+
         with self.engine.connect() as conn:
-            cursor = conn.execute(text(sql_comm))
-            try:
-                return [list(t) for t in cursor]
-            except:
-                pass
+            if DB_Table_Ops.is_valid_sql(sql_query):
+                cursor = conn.execute(text(sql_query))
+
+                try:
+                    return [list(t) for t in cursor]
+                except:
+                    raise ValueError('Cursor is of Ambigous Nature.')
 
 
 if __name__ == '__main__':
