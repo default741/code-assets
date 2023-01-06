@@ -11,6 +11,8 @@
 import pandas as pd
 
 import sqlparse
+import warnings
+import re
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
@@ -23,6 +25,26 @@ class InvalidTableName(Exception):
 
 
 class InvalidSQLQuery(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class InvalidBaseORM(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class InvalidTableORM(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class EmptyDataframeDict(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class ColumnValueMismatch(Exception):
     def __init__(self, *args: object) -> None:
         super().__init__(*args)
 
@@ -61,7 +83,9 @@ class DB_Table_Ops:
         self.show_table_query = {
             'mysql': 'SHOW TABLES;',
             'mssql': 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = \'BASE TABLE\';',
-            'postgresql': 'SELECT relname FROM pg_catalog.pg_class WHERE relkind = \'r\';'
+            'postgresql': 'SELECT relname FROM pg_catalog.pg_class WHERE relkind = \'r\';',
+            'sqlite': '',
+            'oracle': ''
         }
 
         self.engine = None
@@ -191,42 +215,44 @@ class DB_Table_Ops:
             table_object (Union[str, list], optional): Table Class with columns Defined. Defaults to None.
 
         Raises:
-            ValueError: Base ORM Class cannot be None.
-            ValueError: Table Name cannot be None.
-            ValueError: Table Name cannot be None.
-            ValueError: Table Object need to be either str or list.
+            InvalidBaseORM: Base ORM Class is either None or Invalid.
+            InvalidTableName: Table Name cannot be None.
+            InvalidTableName: Table Name cannot be None.
+            InvalidTableORM: Table Object is Invalid. Needs to be either str or list.
         """
 
         if base_object is None:
-            raise ValueError('Base ORM Class cannot be None.')
+            raise InvalidBaseORM('Base ORM Class is either None or Invalid.')
 
         if isinstance(table_object, str):
             table_name = table_object.__tablename__
 
             if table_name is None:
-                raise ValueError('Table Name cannot be None.')
+                raise InvalidTableName('Table Name cannot be None.')
 
             if not self.table_exists(table_name):
                 base_object.metadata.create_all(
                     self.engine, [table_object.__table__])
             else:
-                print('Table Already Exist!')
+                print(f'Table Already Exist in Database {self.database_name}!')
 
         elif isinstance(table_object, list):
             for table in table_object:
                 table_name = table.__tablename__
 
                 if table_name is None:
-                    raise ValueError('Table Name cannot be None.')
+                    raise InvalidTableName('Table Name cannot be None.')
 
                 if not self.table_exists(table_name):
                     base_object.metadata.create_all(
                         self.engine, [table.__table__])
                 else:
-                    print('Table Already Exist!')
+                    print(
+                        'Table Already Exist in Database {self.database_name}!')
 
         else:
-            raise ValueError('Table Object need to be either str or list.')
+            raise InvalidTableORM(
+                'Table Object is Invalid. Needs to be either str or list.')
 
     def delete_table(self, table_name: Union[str, list] = None) -> None:
         """Deletes Table from Database.
@@ -235,30 +261,40 @@ class DB_Table_Ops:
             table_name (Union[str, list], optional): Table Name in Database. Defaults to None.
 
         Raises:
-            ValueError: Table Name (str or list) not Valid.
-            ValueError: Table Name Format Mismatch.
+            InvalidTableName: Table Name (str or list) not Valid.
+            InvalidSQLQuery: SQL Schema String is not a Valid SQL Query
+            InvalidSQLQuery: SQL Schema String is not a Valid SQL Query.
+            InvalidTableName: Table Name Format Mismatch.
         """
 
         if table_name is None or not isinstance(table_name, (str, list)):
-            raise ValueError('Table Name (str or list) not Valid.')
+            raise InvalidTableName('Table Name (str or list) not Valid.')
 
         if isinstance(table_name, str):
             if self.table_exists(table_name):
-                sql_comm = f'''DROP TABLE {table_name}'''
+                sql_query = f'''DROP TABLE {table_name};'''
+
+                if not DB_Table_Ops.is_valid_sql(sql_query):
+                    raise InvalidSQLQuery(
+                        'SQL Schema String is not a Valid SQL Query.')
 
                 with self.engine.connect() as conn:
-                    conn.execute(text(sql_comm))
+                    conn.execute(text(sql_query))
 
         elif isinstance(table_name, list):
             for table in table_name:
                 if self.table_exists(table):
-                    sql_comm = f'''DROP TABLE {table}'''
+                    sql_query = f'''DROP TABLE {table};'''
+
+                    if not DB_Table_Ops.is_valid_sql(sql_query):
+                        raise InvalidSQLQuery(
+                            'SQL Schema String is not a Valid SQL Query.')
 
                     with self.engine.connect() as conn:
-                        conn.execute(text(sql_comm))
+                        conn.execute(text(sql_query))
 
         else:
-            raise ValueError('Table Name Format Mismatch.')
+            raise InvalidTableName('Table Name Format Mismatch.')
 
     def insert_dataframe_to_table(self, dataframe: Union[pd.DataFrame, dict], table_name: str = None) -> None:
         """Insert Pandas Dataframe to Database Table. Dataframe can be a dictionary, which will be converted to Dataframe.
@@ -268,22 +304,31 @@ class DB_Table_Ops:
             table_name (str, optional): Table Name in Database. Defaults to None.
 
         Raises:
-            ValueError: Table Name not Valid.
-            ValueError: Empty Dictionary.
-            ValueError: DataFrame is Empty.
+            InvalidTableName: Table Name (str or list) not Valid.
+            EmptyDataframeDict: Dataframe or Dictionary is Either empty or Invalid.
+            EmptyDataframeDict: Dataframe or Dictionary is Either empty or Invalid.
+
+        Warnings:
+            1. Table does not exist in database. Creating a new Table.
         """
 
         if table_name is None or not isinstance(table_name, str):
-            raise ValueError('Table Name not Valid.')
+            raise InvalidTableName('Table Name (str or list) not Valid.')
 
         if isinstance(dataframe, dict):
             if dataframe == {}:
-                raise ValueError('Empty Dictionary.')
+                raise EmptyDataframeDict(
+                    'Dataframe or Dictionary is Either empty or Invalid.')
 
             dataframe = pd.DataFrame(dataframe)
 
         if dataframe.empty:
-            raise ValueError('DataFrame is Empty.')
+            raise EmptyDataframeDict(
+                'Dataframe or Dictionary is Either empty or Invalid.')
+
+        if not self.table_exists(table_name=table_name):
+            warnings.warn(
+                'Table does not exist in database. Creating a new Table.')
 
         dataframe.to_sql(table_name, self.engine,
                          if_exists="append", index=False)
@@ -297,27 +342,33 @@ class DB_Table_Ops:
             value_list (list): Values for each Column
 
         Raises:
-            ValueError: Columns and Values should be a list.
-            ValueError: Length of Column List and Value List should be Equal.
+            ColumnValueMismatch: Columns and Values should be a list.
+            ColumnValueMismatch: Length of Column\'s List and Value\'s List should be Equal.
+            InvalidSQLQuery: SQL Schema String is not a Valid SQL Query.
         """
 
         if not isinstance(column_list, list) and not isinstance(value_list, list):
-            raise ValueError('Columns and Values should be a list.')
+            raise ColumnValueMismatch('Columns and Values should be a list.')
 
         if len(column_list) != len(value_list):
-            raise ValueError(
-                'Length of Column List and Value List should be Equal.')
+            raise ColumnValueMismatch(
+                'Length of Column\'s List and Value\'s List should be Equal.')
 
         sql_query = f'''INSERT INTO {table_name} ({", ".join(column_list)})
                         VALUES ({", ".join(value_list)});'''
 
-        if not self.table_exists(table_name):
+        if not DB_Table_Ops.is_valid_sql(sql_query):
+            raise InvalidSQLQuery(
+                'SQL Schema String is not a Valid SQL Query.')
+
+        if self.table_exists(table_name):
             with self.engine.connect() as conn:
                 conn.execute(text(sql_query))
+        else:
+            raise InvalidTableName(
+                f'Table Does Not Exist in Database {self.database_name}!')
 
-    def query_dataframe_from_table(
-        self, query: str, index_col: Union[str, list] = None, return_dictionary: bool = False
-    ) -> Union[pd.DataFrame, dict]:
+    def query_dataframe_from_table(self, query: str, index_col: Union[str, list] = None, return_dictionary: bool = False) -> Union[pd.DataFrame, dict]:
         """Reads Data into a Dataframe or Dictionary from Database Table.
 
         Args:
@@ -326,14 +377,28 @@ class DB_Table_Ops:
             return_dictionary (bool, optional): Whether to Return the data as dictionary. Defaults to False.
 
         Raises:
-            ValueError: Schema String Not Valid.
+            InvalidSQLQuery: SQL Schema String is either None or not a Valid String.
+            InvalidSQLQuery: SQL Schema String is not a Valid SQL Query.
+            InvalidTableName: Table Does Not Exist in Database.
 
         Returns:
             Union[pd.DataFrame, dict]: Data as a Pandas Dataframe or Dictionary.
         """
 
         if query is None or not isinstance(query, str):
-            raise ValueError('Schema String Not Valid.')
+            raise InvalidSQLQuery(
+                'SQL Schema String is either None or not Valid.')
+
+        if not DB_Table_Ops.is_valid_sql(query=query):
+            raise InvalidSQLQuery(
+                'SQL Schema String is not a Valid SQL Query.')
+
+        table_name = re.split(r'(FROM|from|From)', query)[
+            2].split(' ')[1].split(';')[0]
+
+        if not self.table_exists(table_name=table_name):
+            raise InvalidTableName(
+                f'Table Does Not Exist in Database {self.database_name}!')
 
         try:
             df = pd.read_sql_query(query, con=self.engine, index_col=index_col)
@@ -342,27 +407,36 @@ class DB_Table_Ops:
 
         return df.to_dict() if return_dictionary else df
 
-    def run_general_sql_commands(self, sql_query: str) -> list:
+    def run_general_sql_commands(self, sql_query: str = None) -> list:
         """Execute General SQL Queries for one or many Table in Database.
 
         Args:
             sql_query (str): SQL Query String.
 
         Raises:
-            ValueError: Cursor is of Ambigous Nature.
+            InvalidSQLQuery: SQL Schema String is either None or not a Valid String.
+            InvalidSQLQuery: SQL Schema String is not a Valid SQL Query.
+            TypeError: Cursor is of Ambigous Nature.
 
         Returns:
             list: Output rows from the Query.
         """
 
-        with self.engine.connect() as conn:
-            if DB_Table_Ops.is_valid_sql(sql_query):
-                cursor = conn.execute(text(sql_query))
+        if sql_query is None or not isinstance(sql_query, str):
+            raise InvalidSQLQuery(
+                'SQL Schema String is either None or not Valid.')
 
-                try:
-                    return [list(t) for t in cursor]
-                except:
-                    raise ValueError('Cursor is of Ambigous Nature.')
+        if not DB_Table_Ops.is_valid_sql(sql_query):
+            raise InvalidSQLQuery(
+                'SQL Schema String is not a Valid SQL Query.')
+
+        with self.engine.connect() as conn:
+            cursor = conn.execute(text(sql_query))
+
+            try:
+                return [list(t) for t in cursor]
+            except:
+                raise TypeError('Cursor is of Ambigous Nature.')
 
 
 if __name__ == '__main__':
