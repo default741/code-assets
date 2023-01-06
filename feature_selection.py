@@ -4,7 +4,8 @@ from statsmodels.tools.tools import add_constant
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.inspection import permutation_importance
-from sklearn.feature_selection import SelectFromModel, RFE, mutual_info_classif
+from sklearn.feature_selection import (
+    SelectFromModel, RFE, mutual_info_classif, f_classif, chi2, VarianceThreshold)
 from sklearn.linear_model import LogisticRegression, RidgeClassifier, ElasticNet
 
 from boruta import BorutaPy
@@ -122,14 +123,54 @@ class _Utils:
 class _Select_Methods:
 
     # TODO: Add Correlation based FS
-    # TODO: Add Variance based FS
-    # TODO: Add Chi-Squared Test based FS
-    # TODO: Add ANOVA F-Value based FS
-    # TODO: Add Mutual Info Classif based FS
+
+    @staticmethod
+    def _chi_squared_test_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
+        chi2_values, chi2_pvalues = chi2(data, target)
+
+        feature_list = pd.DataFrame(
+            {'features': data.columns, 'chi2_values': chi2_values, 'chi2_pvalues': chi2_pvalues})
+
+        feature_list = feature_list[feature_list['chi2_pvalues'] > 0.05].sort_values(by=[
+                                                                                     'chi2_values'])
+
+        if 'num_feat' in kwargs.keys():
+            return {'chi_squared_test': data[feature_list['features'][:kwargs['num_feat']]]}
+
+        else:
+            return {'chi_squared_test': data[feature_list['features']]}
+
+    @staticmethod
+    def _anova_f_value_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
+        anova_f_values, anova_f_pvalues = f_classif(data, target)
+
+        feature_list = pd.DataFrame(
+            {'features': data.columns, 'anova_f_values': anova_f_values, 'anova_f_pvalues': anova_f_pvalues})
+
+        feature_list = feature_list[feature_list['anova_f_pvalues'] > 0.05].sort_values(by=[
+                                                                                        'anova_f_values'])
+
+        if 'num_feat' in kwargs.keys():
+            return {'anova_f_value': data[feature_list['features'][:kwargs['num_feat']]]}
+
+        else:
+            return {'anova_f_value': data[feature_list['features']]}
 
     @staticmethod
     def _mutual_info_classif_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
-        pass
+        mutual_info = mutual_info_classif(data, target)
+
+        feature_list = pd.DataFrame(
+            {'features': data.columns, 'mutual_info': mutual_info})
+
+        feature_list = feature_list[feature_list['mutual_info'] > 0].sort_values(by=[
+                                                                                 'mutual_info'])
+
+        if 'num_feat' in kwargs.keys():
+            return {'mutual_info_classif': data[feature_list['features'][:kwargs['num_feat']]]}
+
+        else:
+            return {'mutual_info_classif': data[feature_list['features']]}
 
     @staticmethod
     def _logit_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
@@ -611,6 +652,27 @@ class FeatureSelection:
 
         return (input_data, target_data)
 
+    def drop_low_variance_features(self, data: pd.DataFrame, threshold: float = 0.5) -> pd.DataFrame:
+        """Drop Freatures having very low variance in the data.
+
+        Args:
+            data (pd.DataFrame): Input Data
+            threshold (float, optional): Variance Threshold. Defaults to 0.5.
+
+        Returns:
+            pd.DataFrame: Low Varinace Dropped Data
+        """
+
+        print('Dropping Low Variance Features -')
+
+        var_thresh_object = VarianceThreshold(threshold=threshold)
+        select_feat = var_thresh_object.fit_transform(data)
+
+        data = pd.DataFrame(
+            data=select_feat, columns=data.columns[var_thresh_object.get_support()])
+
+        return data
+
     def drop_multicolliner_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """Drops Features having High Multicollinearity from the data.
 
@@ -710,7 +772,7 @@ class FeatureSelection:
 
     def compile_selection(
         self, file_path: str, file_type: str, target_feature: str, test_size: float, save_path: str, drop_multicolliner_features: bool = True,
-        feature_select_conf: list = []
+        drop_low_variance_features: bool = True, variance_thresh: float = 0.5, feature_select_conf: list = []
     ) -> dict:
         """Compile and Runs the Feature Selection Pipeline
 
@@ -727,6 +789,10 @@ class FeatureSelection:
 
         data, target = self.read_data(
             file_path=file_path, file_type=file_type, target_feature=target_feature)
+
+        if drop_low_variance_features:
+            data = self.drop_low_variance_features(
+                data=data, threshold=variance_thresh)
 
         if drop_multicolliner_features:
             data = self.drop_multicolliner_features(data=data)
