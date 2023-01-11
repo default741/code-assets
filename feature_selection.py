@@ -2,6 +2,7 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor as vi
 from statsmodels.tools.tools import add_constant
 
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.inspection import permutation_importance
 from sklearn.feature_selection import (
@@ -10,6 +11,9 @@ from sklearn.linear_model import LogisticRegression, RidgeClassifier, ElasticNet
 
 from boruta import BorutaPy
 from mlxtend.feature_selection import SequentialFeatureSelector as sfs
+from catboost import CatBoostClassifier
+from lightgbm import LGBMClassifier
+from xgboost import XGBClassifier
 
 import joblib
 
@@ -119,13 +123,38 @@ class _Utils:
 
         return pd.DataFrame({'feature': model.pvalues.index, 'p_value': model.pvalues.values})
 
+    @staticmethod
+    def _encode_target_variables(data: pd.DataFrame, target_feature: str) -> tuple:
+        """Encodes the target feature if not already encoded
+
+        Args:
+            data (pd.DataFrame): Input data with the target feature
+            target_feature (str): Target Feature Name
+
+        Returns:
+            tuple: Dataframe with target feature encoded, encoder object
+        """
+
+        encoder = LabelEncoder().fit(data[target_feature])
+        data[target_feature] = encoder.transform(data[target_feature])
+
+        return (data, encoder)
+
 
 class _Select_Methods:
 
-    # TODO: Add Correlation based FS
-
     @staticmethod
     def _chi_squared_test_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
+        """Feature Selection Method using Chi-Squared Test
+
+        Args:
+            data (pd.DataFrame): Input Data
+            target (pd.DataFrame): Target Data
+
+        Returns:
+            dict: Selected Features Dictionary
+        """
+
         chi2_values, chi2_pvalues = chi2(data, target)
 
         feature_list = pd.DataFrame(
@@ -142,6 +171,16 @@ class _Select_Methods:
 
     @staticmethod
     def _anova_f_value_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
+        """Feature Selection Method using ANOVA-F Value
+
+        Args:
+            data (pd.DataFrame): Input Data
+            target (pd.DataFrame): Target Data
+
+        Returns:
+            dict: Selected Features Dictionary
+        """
+
         anova_f_values, anova_f_pvalues = f_classif(data, target)
 
         feature_list = pd.DataFrame(
@@ -158,6 +197,16 @@ class _Select_Methods:
 
     @staticmethod
     def _mutual_info_classif_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
+        """Feature Selection Method using Mutual Information Classifier
+
+        Args:
+            data (pd.DataFrame): Input Data
+            target (pd.DataFrame): Target Data
+
+        Returns:
+            dict: Selected Features Dictionary
+        """
+
         mutual_info = mutual_info_classif(data, target)
 
         feature_list = pd.DataFrame(
@@ -237,8 +286,12 @@ class _Select_Methods:
         perm_impt_dict = dict()
 
         model_list = {
-            'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1).fit(data, target),
-            'gradient_boosting': GradientBoostingClassifier(random_state=0).fit(data, target)
+            'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1),
+            'catboost': CatBoostClassifier(random_state=0),
+            'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
+            'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
+            'gradient_boosting': GradientBoostingClassifier(random_state=0),
+            'logistic_regression': LogisticRegression(random_state=0, n_jobs=-1)
         }
 
         if 'model_list' in kwargs:
@@ -246,7 +299,7 @@ class _Select_Methods:
                       [0].lower() != 'all' else model_list.keys())
 
             for model_type in models:
-                model = model_list[model_type]
+                model = model_list.get(model_type).fit(data, target)
 
                 perm_impt = permutation_importance(
                     model, data, target, n_repeats=10, random_state=0, n_jobs=-1)
@@ -292,8 +345,12 @@ class _Select_Methods:
         rfe_impt_dict = dict()
 
         model_list = {
-            'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1).fit(data, target),
-            'gradient_boosting': GradientBoostingClassifier(random_state=0).fit(data, target)
+            'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1),
+            'catboost': CatBoostClassifier(random_state=0),
+            'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
+            'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
+            'gradient_boosting': GradientBoostingClassifier(random_state=0),
+            'logistic_regression': LogisticRegression(random_state=0, n_jobs=-1)
         }
 
         if 'model_list' in kwargs:
@@ -301,7 +358,7 @@ class _Select_Methods:
                       [0].lower() != 'all' else model_list.keys())
 
             for model_type in models:
-                model = model_list[model_type]
+                model = model_list.get(model_type).fit(data, target)
 
                 rfe_model = None
 
@@ -352,7 +409,10 @@ class _Select_Methods:
         mbi_feat = dict()
 
         model_list = {
-            'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1).fit(data, target),
+            'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1),
+            'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
+            'catboost': CatBoostClassifier(random_state=0),
+            'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
         }
 
         if 'model_list' in kwargs:
@@ -360,7 +420,7 @@ class _Select_Methods:
                       [0].lower() != 'all' else model_list.keys())
 
             for model_type in models:
-                model = model_list[model_type]
+                model = model_list.get(model_type).fit(data, target)
 
                 impt_df = pd.DataFrame({'feature': data.columns, 'avg_impt': model.feature_importances_}).sort_values(
                     by=['avg_impt'], ascending=False).reset_index(drop=True)
@@ -419,7 +479,7 @@ class _Select_Methods:
                       [0].lower() != 'all' else model_list.keys())
 
             for model_type in models:
-                model = model_list[model_type]
+                model = model_list.get(model_type)
 
                 selector = None
 
@@ -472,8 +532,12 @@ class _Select_Methods:
         boruta_impt_dict = dict()
 
         model_list = {
-            'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1).fit(data, target),
-            'gradient_boosting': GradientBoostingClassifier(random_state=0).fit(data, target)
+            'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1),
+            'catboost': CatBoostClassifier(random_state=0),
+            'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
+            'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
+            'gradient_boosting': GradientBoostingClassifier(random_state=0),
+            'logistic_regression': LogisticRegression(random_state=0, n_jobs=-1)
         }
 
         if 'model_list' in kwargs:
@@ -481,7 +545,7 @@ class _Select_Methods:
                       [0].lower() != 'all' else model_list.keys())
 
             for model_type in models:
-                model = model_list[model_type]
+                model = model_list.get(model_type)
 
                 boruta_model = BorutaPy(
                     estimator=model, n_estimators='auto', verbose=0).fit(data.values, target)
@@ -523,8 +587,12 @@ class _Select_Methods:
         sfs_impt_dict = dict()
 
         model_list = {
-            'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1).fit(data, target),
-            'gradient_boosting': GradientBoostingClassifier(random_state=0).fit(data, target)
+            'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1),
+            'catboost': CatBoostClassifier(random_state=0),
+            'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
+            'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
+            'gradient_boosting': GradientBoostingClassifier(random_state=0),
+            'logistic_regression': LogisticRegression(random_state=0, n_jobs=-1)
         }
 
         num_feat = 25 if 'num_feat' not in kwargs.key() else kwargs['num_feat']
@@ -534,7 +602,7 @@ class _Select_Methods:
                       [0].lower() != 'all' else model_list.keys())
 
             for model_type in models:
-                model = model_list[model_type]
+                model = model_list.get(model_type).fit(data, target)
 
                 fs_model = sfs(model, k_features=num_feat, verbose=1, forward=True,
                                scoring='roc_auc', cv=5, n_jobs=-1).fit(data, target)
@@ -590,6 +658,7 @@ class FeatureSelection:
     Methods:
         __init__: Class Initialization Method.
         read_data: Reads Raw Data.
+        drop_low_variance_features: Drop Freatures having very low variance in the data.
     """
 
     def __init__(self) -> None:
@@ -603,6 +672,9 @@ class FeatureSelection:
         }
 
         self._selection_methods = {
+            'chi_squared_test_selection': _Select_Methods._chi_squared_test_selection,
+            'anova_f_value_selection': _Select_Methods._anova_f_value_selection,
+            'mutual_info_classif_selection': _Select_Methods._mutual_info_classif_selection,
             'logit_selection': _Select_Methods._logit_selection,
             'permutation_impt_selection': _Select_Methods._permutation_impt_selection,
             'recursive_feature_elimination': _Select_Methods._recursive_feature_elimination,
@@ -612,7 +684,7 @@ class FeatureSelection:
             'sequencial_forward_selection': _Select_Methods._sequencial_forward_selection
         }
 
-    def read_data(self, file_type: str, file_path: str, target_feature: str = None, **kwargs) -> tuple:
+    def read_data(self, file_type: str, file_path: str, target_feature: str = None, encode_target: bool = True, **kwargs) -> tuple:
         """Reads Raw Data
 
         Args:
@@ -628,6 +700,8 @@ class FeatureSelection:
             tuple: Input Data and Target Data
         """
 
+        raw_data = pd.DataFrame()
+
         if file_type not in self._read_data.keys():
             raise ValueError('Invalid File Type.')
 
@@ -640,6 +714,10 @@ class FeatureSelection:
 
         except Exception as E:
             print(f'File Type Mismatch. {E}')
+
+        if encode_target:
+            raw_data = _Utils._encode_target_variables(
+                data=raw_data, target_feature=target_feature)
 
         input_data = raw_data.drop(columns=[target_feature])
         target_data = raw_data[target_feature].values
@@ -670,6 +748,31 @@ class FeatureSelection:
 
         data = pd.DataFrame(
             data=select_feat, columns=data.columns[var_thresh_object.get_support()])
+
+        return data
+
+    def drop_high_correlated_features(self, data: pd.DataFrame, threshold: float = 0.7, corr_method: str = 'pearson') -> pd.DataFrame:
+        """Drop Freatures having very high correlation between each other.
+
+        Args:
+            data (pd.DataFrame): Input Data
+            threshold (float, optional): Correlation Threshold. Defaults to 0.7.
+            corr_method (str, optional): Correlation Method. Defaults to 'pearson'.
+
+        Returns:
+            pd.DataFrame: Dataframe with High Correlated Features Dropped.
+        """
+
+        print('Dropping High Correlated Features -')
+
+        corr_matrix = data.corr(method=corr_method).abs()
+
+        corr_upper_matrix = corr_matrix.where(
+            np.triu(np.ones(corr_matrix.shape), k=1).astype(np.bool))
+        cols_to_drop = [col for col in corr_upper_matrix.columns if any(
+            corr_upper_matrix[col] > threshold)]
+
+        data = data.drop(columns=cols_to_drop).reset_index(drop=True)
 
         return data
 
@@ -772,7 +875,8 @@ class FeatureSelection:
 
     def compile_selection(
         self, file_path: str, file_type: str, target_feature: str, test_size: float, save_path: str, drop_multicolliner_features: bool = True,
-        drop_low_variance_features: bool = True, variance_thresh: float = 0.5, feature_select_conf: list = []
+        drop_low_variance_features: bool = True, variance_thresh: float = 0.5, feature_select_conf: list = [], drop_high_corr_features: bool = True,
+        corr_threshold: float = 0.7, corr_method: str = 'pearson'
     ) -> dict:
         """Compile and Runs the Feature Selection Pipeline
 
@@ -793,6 +897,10 @@ class FeatureSelection:
         if drop_low_variance_features:
             data = self.drop_low_variance_features(
                 data=data, threshold=variance_thresh)
+
+        if drop_high_corr_features:
+            data = self.drop_high_correlated_features(
+                data=data, threshold=corr_threshold, corr_method=corr_method)
 
         if drop_multicolliner_features:
             data = self.drop_multicolliner_features(data=data)
