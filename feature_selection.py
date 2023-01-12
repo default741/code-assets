@@ -16,10 +16,38 @@ from lightgbm import LGBMClassifier
 from xgboost import XGBClassifier
 
 import joblib
+import warnings
 
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
+
+warnings.filterwarnings('ignore')
+
+
+class InvalidFileType(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class TargetFeatureException(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class FeatureDropException(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class InvalidSelectionMethod(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class DataException(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
 
 
 class _Read_Data_File:
@@ -82,14 +110,14 @@ class _Utils:
             data (pd.DataFrame): Input Data
 
         Raises:
-            ValueError: If Dataframe is empty.
+            DataException: If Dataframe is empty.
 
         Returns:
             pd.DataFrame: Features with their VIF Values.
         """
 
         if data.empty:
-            raise ValueError('Dataframe cannot be empty.')
+            raise DataException('Dataframe cannot be empty.')
 
         if add_const:
             data = add_constant(data)
@@ -97,7 +125,7 @@ class _Utils:
         return pd.DataFrame({'Feature': data.columns.values, 'VIF': [vif(data.values, idx) for idx in range(data.shape[1])]})
 
     @staticmethod
-    def _calculate_pvalues(data: pd.DataFrame, target: np.array, fit_method: str = 'Newton-Raphson') -> pd.DataFrame:
+    def _calculate_pvalues(data: pd.DataFrame, target: np.array, fit_method: str = None) -> pd.DataFrame:
         """Calculates and Returns P-Values from Data.
 
         Args:
@@ -105,21 +133,26 @@ class _Utils:
             target (np.array): Target Data
 
         Raises:
-            ValueError: If Dataframe is empty.
-            ValueError: Input Data and Target Data should have same Length.
+            DataException: If Dataframe is empty.
+            DataException: Input Data and Target Data should have same Length.
 
         Returns:
             pd.DataFrame: Dataframe containing P-Values.
         """
 
+        model = None
+
         if data.empty:
-            raise ValueError('Dataframe cannot be empty.')
+            raise DataException('Dataframe cannot be empty.')
 
         if data.shape[0] != target.shape[0]:
-            raise ValueError(
+            raise DataException(
                 'Input Data and Target Data should have same Length.')
 
-        model = sm.Logit(target, data).fit(disp=0, method=fit_method)
+        if fit_method is not None:
+            model = sm.Logit(target, data).fit(disp=0, method=fit_method)
+        else:
+            model = sm.Logit(target, data).fit(disp=0)
 
         return pd.DataFrame({'feature': model.pvalues.index, 'p_value': model.pvalues.values})
 
@@ -144,32 +177,6 @@ class _Utils:
 class _Select_Methods:
 
     @staticmethod
-    def _chi_squared_test_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
-        """Feature Selection Method using Chi-Squared Test
-
-        Args:
-            data (pd.DataFrame): Input Data
-            target (pd.DataFrame): Target Data
-
-        Returns:
-            dict: Selected Features Dictionary
-        """
-
-        chi2_values, chi2_pvalues = chi2(data, target)
-
-        feature_list = pd.DataFrame(
-            {'features': data.columns, 'chi2_values': chi2_values, 'chi2_pvalues': chi2_pvalues})
-
-        feature_list = feature_list[feature_list['chi2_pvalues'] > 0.05].sort_values(by=[
-                                                                                     'chi2_values'])
-
-        if 'num_feat' in kwargs.keys():
-            return {'chi_squared_test': data[feature_list['features'][:kwargs['num_feat']]]}
-
-        else:
-            return {'chi_squared_test': data[feature_list['features']]}
-
-    @staticmethod
     def _anova_f_value_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
         """Feature Selection Method using ANOVA-F Value
 
@@ -190,10 +197,10 @@ class _Select_Methods:
                                                                                         'anova_f_values'])
 
         if 'num_feat' in kwargs.keys():
-            return {'anova_f_value': data[feature_list['features'][:kwargs['num_feat']]]}
+            return {'anova_f_value': list(data[feature_list['features'].iloc[:kwargs['num_feat']]].columns)}
 
         else:
-            return {'anova_f_value': data[feature_list['features']]}
+            return {'anova_f_value': list(data[feature_list['features']].columns)}
 
     @staticmethod
     def _mutual_info_classif_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
@@ -216,10 +223,10 @@ class _Select_Methods:
                                                                                  'mutual_info'])
 
         if 'num_feat' in kwargs.keys():
-            return {'mutual_info_classif': data[feature_list['features'][:kwargs['num_feat']]]}
+            return {'mutual_info_classif': list(data[feature_list['features'].iloc[:kwargs['num_feat']]].columns)}
 
         else:
-            return {'mutual_info_classif': data[feature_list['features']]}
+            return {'mutual_info_classif': list(data[feature_list['features']].columns)}
 
     @staticmethod
     def _logit_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
@@ -230,13 +237,11 @@ class _Select_Methods:
             target (np.array): Target Data
 
         Raises:
-            ValueError: All Features Dropped.
+            FeatureDropException: All Features Dropped.
 
         Returns:
             dict: Feature Selected DataFrame.
         """
-
-        print(f'\tRunning Logit Feature Selection')
 
         p_values = None
 
@@ -250,24 +255,19 @@ class _Select_Methods:
             id_max = p_values[['p_value']].idxmax()
             feature_to_drop = str(p_values.iloc[id_max]['feature'].values[0])
 
-            print(
-                f'\t\tFeature Dropped: {feature_to_drop}; p-value: {p_values.iloc[id_max]["p_value"].values[0]}')
-
             data = data.drop(columns=[feature_to_drop])
 
             if data.shape[1] == 0:
-                raise ValueError(
+                raise FeatureDropException(
                     'All Features Dropped. Suggestion - Don\'t use Logit Selection or try a different fit method.')
 
-            if 'fit_method' in kwargs:
+            if 'fit_method' in kwargs and kwargs['fit_method'] is not None:
                 p_values = _Utils._calculate_pvalues(
                     data=data, target=target, fit_method=kwargs['fit_method'])
             else:
                 p_values = _Utils._calculate_pvalues(data=data, target=target)
 
-        data['target_label'] = target
-
-        return {'logit': data.copy()}
+        return {'logit': list(data.columns)}
 
     @staticmethod
     def _permutation_impt_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
@@ -672,7 +672,6 @@ class FeatureSelection:
         }
 
         self._selection_methods = {
-            'chi_squared_test_selection': _Select_Methods._chi_squared_test_selection,
             'anova_f_value_selection': _Select_Methods._anova_f_value_selection,
             'mutual_info_classif_selection': _Select_Methods._mutual_info_classif_selection,
             'logit_selection': _Select_Methods._logit_selection,
@@ -693,30 +692,39 @@ class FeatureSelection:
             target_feature (str, optional): Target Label. Defaults to None.
 
         Raises:
-            ValueError: Invalid File Type.
-            TypeError: Target Feature not Specified.
+            InvalidFileType: File Type Invalid. Not present in the specified List of types.
+            TargetFeatureException: Target Feature Name not Provided. Please Provide a valid Target feature Name.
+            TargetFeatureException: Target Feature not found in Raw Data Columns.
 
         Returns:
             tuple: Input Data and Target Data
         """
 
         raw_data = pd.DataFrame()
+        encoder = None
 
         if file_type not in self._read_data.keys():
-            raise ValueError('Invalid File Type.')
+            raise InvalidFileType(
+                'File Type Invalid. Not present in the specified List of types.')
 
         if target_feature is None:
-            raise TypeError('Please Specify a Target Feature.')
+            raise TargetFeatureException(
+                'Target Feature Name not Provided. Please Provide a valid Target feature Name.')
 
         try:
             raw_data = self._read_data[file_type](
                 file_path=file_path, params=kwargs)
 
         except Exception as E:
-            print(f'File Type Mismatch. {E}')
+            print(
+                f'Error occured While reading the File. Please Check the parameters carefully. {E}')
+
+        if target_feature not in raw_data.columns:
+            raise TargetFeatureException(
+                'Target Feature not found in Raw Data Columns.')
 
         if encode_target:
-            raw_data = _Utils._encode_target_variables(
+            raw_data, encoder = _Utils._encode_target_variables(
                 data=raw_data, target_feature=target_feature)
 
         input_data = raw_data.drop(columns=[target_feature])
@@ -724,11 +732,13 @@ class FeatureSelection:
 
         file_name = file_path.split('/')[-1].split('.')[0]
 
-        print('READING FILE -')
+        print(f'READING FILE NAME: {file_name}')
         print(
-            f'NAME: {file_name}, SHAPE: ROWS - {raw_data.shape[0]}, COLUMNS - {raw_data.shape[1]}, TARGET LABEL: {target_feature}')
+            f'SHAPE: ROWS - {raw_data.shape[0]}, COLUMNS - {raw_data.shape[1] - 1}')
+        print(
+            f'TARGET LABEL: {target_feature}, ENCODER CLASS: {encoder.classes_}')
 
-        return (input_data, target_data)
+        return (input_data, target_data, encoder)
 
     def drop_low_variance_features(self, data: pd.DataFrame, threshold: float = 0.5) -> pd.DataFrame:
         """Drop Freatures having very low variance in the data.
@@ -741,13 +751,18 @@ class FeatureSelection:
             pd.DataFrame: Low Varinace Dropped Data
         """
 
-        print('Dropping Low Variance Features -')
+        init_columns = set(data.columns)
 
         var_thresh_object = VarianceThreshold(threshold=threshold)
         select_feat = var_thresh_object.fit_transform(data)
 
         data = pd.DataFrame(
             data=select_feat, columns=data.columns[var_thresh_object.get_support()])
+
+        print(
+            f'\nAFTER DROPPING LOW VARIANCE FEATURES (THRESHOLD - {threshold}):')
+        print(f'SHAPE: ROWS - {data.shape[0]}, COLUMNS - {data.shape[1]}')
+        print(f'FEATURES DROPPED: {list(init_columns - set(data.columns))}')
 
         return data
 
@@ -763,16 +778,20 @@ class FeatureSelection:
             pd.DataFrame: Dataframe with High Correlated Features Dropped.
         """
 
-        print('Dropping High Correlated Features -')
-
+        init_columns = set(data.columns)
         corr_matrix = data.corr(method=corr_method).abs()
 
         corr_upper_matrix = corr_matrix.where(
-            np.triu(np.ones(corr_matrix.shape), k=1).astype(np.bool))
+            np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
         cols_to_drop = [col for col in corr_upper_matrix.columns if any(
             corr_upper_matrix[col] > threshold)]
 
         data = data.drop(columns=cols_to_drop).reset_index(drop=True)
+
+        print(
+            f'\nAFTER DROPPING HIGH CORRELATED FEATURES (THRESHOLD - {threshold}):')
+        print(f'SHAPE: ROWS - {data.shape[0]}, COLUMNS - {data.shape[1]}')
+        print(f'FEATURES DROPPED: {list(init_columns - set(data.columns))}')
 
         return data
 
@@ -783,14 +802,15 @@ class FeatureSelection:
             data (pd.DataFrame): Input Data
 
         Raises:
-            ValueError: All Features Dropped.
+            FeatureDropException: All Features Dropped.
 
         Returns:
             pd.DataFrame: Output Data with No Collinear Features
         """
 
-        print('Dropping Multicollinear Features -')
+        print('\nRUNNING: DROP MULTI-COLLINEAR FEATURES')
 
+        init_columns = set(data.columns)
         vif_df = _Utils._calculate_vif(data=data)
 
         while vif_df['VIF'].max() > 5:
@@ -804,7 +824,8 @@ class FeatureSelection:
                 data = data.drop(columns=[feature_to_drop])
 
                 if data.shape[1] == 0:
-                    raise ValueError('All Features Dropped.')
+                    raise FeatureDropException(
+                        'All Features Dropped while dropping Multicollinear Features.')
 
                 vif_df = _Utils._calculate_vif(data=data)
 
@@ -814,7 +835,10 @@ class FeatureSelection:
             finally:
                 break
 
-        print(f'\n\tColumns to keep (After VIF Data): {data.shape[1]}\n')
+        print(
+            f'\nAFTER DROPPING MULTI-COLLINEAR FEATURES:')
+        print(f'SHAPE: ROWS - {data.shape[0]}, COLUMNS - {data.shape[1]}')
+        print(f'FEATURES DROPPED: {list(init_columns - set(data.columns))}')
 
         return data
 
@@ -826,23 +850,29 @@ class FeatureSelection:
             target (np.array): Target Data
             conf (list): Configuration for Feature Selection.
 
+        Raises:
+            InvalidSelectionMethod: Invalid Feature Selection Method.
+
         Returns:
             dict: Output Dataset with Selected Features.
         """
 
-        print('Selecting Features -')
+        print('RUNNING: FEATURE SELECTION')
 
         feat_dict = dict()
 
         for select_method in conf:
             method_name = select_method['select_method']
 
+            print(f'\tMethod Name: {method_name}')
+
             if method_name in self._selection_methods.keys():
                 feat_dict[method_name] = self._selection_methods[method_name](
                     data.copy(), target, **select_method['params'])
 
             else:
-                raise TypeError('Invalid Feature Selection Method.')
+                raise InvalidSelectionMethod(
+                    'Invalid Feature Selection Method.')
 
         return feat_dict
 
@@ -891,7 +921,7 @@ class FeatureSelection:
             dict: Final Data Dict
         """
 
-        data, target = self.read_data(
+        data, target, encoder = self.read_data(
             file_path=file_path, file_type=file_type, target_feature=target_feature)
 
         if drop_low_variance_features:
@@ -907,18 +937,18 @@ class FeatureSelection:
 
         selection_dict = self.select_features(
             data=data, target=target, conf=feature_select_conf)
-        selection_dict = self.get_train_test_split_data(
-            data_dict=selection_dict, test_size=test_size)
+        # selection_dict = self.get_train_test_split_data(
+        #     data_dict=selection_dict, test_size=test_size)
 
-        print('\nFinal Data Info. -')
+        # print('\nFinal Data Info. -')
 
-        for select_type, select_data in selection_dict.items():
-            print(
-                f'\tSelection Name: {select_type}, SHAPE: ROWS - {select_data["X_train"].shape[0]}, COLUMNS - {select_data["X_train"].shape[1]}')
+        # for select_type, select_data in selection_dict.items():
+        #     print(
+        #         f'\tSelection Name: {select_type}, SHAPE: ROWS - {select_data["X_train"].shape[0]}, COLUMNS - {select_data["X_train"].shape[1]}')
 
-        self.save_data(data_dict=selection_dict, path=save_path)
+        # self.save_data(data_dict=selection_dict, path=save_path)
 
-        print(f'\nData Transformation Finished\n{"-" * 100}')
+        # print(f'\nData Transformation Finished\n{"-" * 100}')
 
         return selection_dict
 
@@ -930,8 +960,29 @@ if __name__ == '__main__':
         'file_path': './data/transformed_data_v1.csv',
         'file_type': 'csv',
         'target_feature': 'target_label',
+
+        'drop_low_variance_features': True,
+        'variance_thresh': 0.3,
+
+        'drop_high_corr_features': True,
+        'corr_threshold': 0.8,
+        'corr_method': 'pearson',
+
         'drop_multicolliner_features': True,
+
         'feature_select_conf': [
+            {
+                'select_method': 'anova_f_value_selection',
+                'params': {
+                    'num_feat': 15
+                }
+            },
+            {
+                'select_method': 'mutual_info_classif_selection',
+                'params': {
+                    'num_feat': 15
+                }
+            },
             {
                 'select_method': 'logit_selection',
                 'params': {
@@ -939,23 +990,27 @@ if __name__ == '__main__':
                 }
             },
 
-            {
-                'select_method': 'permutation_impt_selection',
-                'params': {
-                    'model_list': ['all']
-                }
-            },
+            # {
+            #     'select_method': 'permutation_impt_selection',
+            #     'params': {
+            #         'model_list': ['all']
+            #     }
+            # },
 
-            {
-                'select_method': 'recursive_feature_elimination',
-                'params': {
-                    'model_list': ['all'],
-                    'num_feat': 15
-                }
-            }
+            # {
+            #     'select_method': 'recursive_feature_elimination',
+            #     'params': {
+            #         'model_list': ['all'],
+            #         'num_feat': 15
+            #     }
+            # }
         ],
         'test_size': 0.2,
         'save_path': '../data/interim_data/feature_selected_data_v1.joblib'
     }
 
     feature_selection = FeatureSelection().compile_selection(**config)
+
+    import json
+
+    print(f'\n{json.dumps(feature_selection, indent=4)}')
