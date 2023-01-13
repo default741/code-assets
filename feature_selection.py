@@ -17,6 +17,7 @@ from xgboost import XGBClassifier
 
 import joblib
 import warnings
+import math
 
 import pandas as pd
 import numpy as np
@@ -46,6 +47,11 @@ class InvalidSelectionMethod(Exception):
 
 
 class DataException(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class EmptyModelList(Exception):
     def __init__(self, *args: object) -> None:
         super().__init__(*args)
 
@@ -188,6 +194,7 @@ class _Select_Methods:
             dict: Selected Features Dictionary
         """
 
+        num_feat = kwargs['num_feat'] if kwargs['num_feat'] is not None else 15
         anova_f_values, anova_f_pvalues = f_classif(data, target)
 
         feature_list = pd.DataFrame(
@@ -196,11 +203,7 @@ class _Select_Methods:
         feature_list = feature_list[feature_list['anova_f_pvalues'] > 0.05].sort_values(by=[
                                                                                         'anova_f_values'])
 
-        if 'num_feat' in kwargs.keys():
-            return {'anova_f_value': list(data[feature_list['features'].iloc[:kwargs['num_feat']]].columns)}
-
-        else:
-            return {'anova_f_value': list(data[feature_list['features']].columns)}
+        return {'anova_f_value': list(data[feature_list['features'].iloc[:num_feat]].columns)}
 
     @staticmethod
     def _mutual_info_classif_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
@@ -214,6 +217,7 @@ class _Select_Methods:
             dict: Selected Features Dictionary
         """
 
+        num_feat = kwargs['num_feat'] if kwargs['num_feat'] is not None else 15
         mutual_info = mutual_info_classif(data, target)
 
         feature_list = pd.DataFrame(
@@ -222,11 +226,7 @@ class _Select_Methods:
         feature_list = feature_list[feature_list['mutual_info'] > 0].sort_values(by=[
                                                                                  'mutual_info'])
 
-        if 'num_feat' in kwargs.keys():
-            return {'mutual_info_classif': list(data[feature_list['features'].iloc[:kwargs['num_feat']]].columns)}
-
-        else:
-            return {'mutual_info_classif': list(data[feature_list['features']].columns)}
+        return {'mutual_info_classif': list(data[feature_list['features'].iloc[:num_feat]].columns)}
 
     @staticmethod
     def _logit_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
@@ -277,29 +277,41 @@ class _Select_Methods:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
 
+        Raises:
+            EmptyModelList: No Model List Parameter in Key Word Arguments.
+            EmptyModelList: Specified Model Type not in List.
+
         Returns:
             dict: Feature Selected DataFrame.
         """
-
-        print(f'\n\tRunning Permutation Importance Feature Selection')
 
         perm_impt_dict = dict()
 
         model_list = {
             'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1),
-            'catboost': CatBoostClassifier(random_state=0),
+            'catboost': CatBoostClassifier(random_state=0, n_estimators=100, verbose=False),
             'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
             'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
             'gradient_boosting': GradientBoostingClassifier(random_state=0),
             'logistic_regression': LogisticRegression(random_state=0, n_jobs=-1)
         }
 
+        num_feat = kwargs['num_feat'] if kwargs['num_feat'] is not None else 15
+
         if 'model_list' in kwargs:
-            models = (kwargs['model_list'] if kwargs['model_list']
-                      [0].lower() != 'all' else model_list.keys())
+            models = (kwargs['model_list'] if kwargs['model_list'][0].lower(
+            ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                model = model_list.get(model_type).fit(data, target)
+                print(f'\t\tModel Type: {model_type}')
+
+                model = None
+
+                if model_type in model_list:
+                    model = model_list.get(model_type).fit(data, target)
+                else:
+                    raise EmptyModelList(
+                        f'No Model Type {model_type} in Model List.')
 
                 perm_impt = permutation_importance(
                     model, data, target, n_repeats=10, random_state=0, n_jobs=-1)
@@ -307,24 +319,14 @@ class _Select_Methods:
                 perm_df = pd.DataFrame({'feature': data.columns.values, 'avg_impt': perm_impt.importances_mean}).sort_values(
                     by=['avg_impt'], ascending=False).reset_index(drop=True)
 
-                data = data[perm_df[perm_df['avg_impt'] > 0]['feature'].values]
-                data['target_label'] = target
+                data = data[perm_df[perm_df['avg_impt'] > 0]
+                            ['feature'].iloc[:num_feat].values]
 
-                perm_impt_dict[model_type] = data.copy()
+                perm_impt_dict[model_type] = list(data.columns)
 
         else:
-            model = RandomForestClassifier(
-                random_state=0, n_jobs=-1).fit(data, target)
-            perm_impt = permutation_importance(
-                model, data, target, n_repeats=10, random_state=0, n_jobs=-1)
-
-            perm_df = pd.DataFrame({'feature': data.columns.values, 'avg_impt': perm_impt.importances_mean}).sort_values(
-                by=['avg_impt'], ascending=False).reset_index(drop=True)
-
-            data = data[perm_df[perm_df['avg_impt'] > 0]['feature'].values]
-            data['target_label'] = target
-
-            perm_impt_dict['random_forest'] = data.copy()
+            raise EmptyModelList(
+                'No Model List Parameter in Key Word Arguments.')
 
         return perm_impt_dict
 
@@ -336,59 +338,53 @@ class _Select_Methods:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
 
+        Raises:
+            EmptyModelList: No Model List Parameter in Key Word Arguments.
+            EmptyModelList: Specified Model Type not in List.
+
         Returns:
             pd.DataFrame: Feature Selected DataFrame.
         """
-
-        print(f'\n\tRunning RFE Feature Selection')
 
         rfe_impt_dict = dict()
 
         model_list = {
             'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1),
-            'catboost': CatBoostClassifier(random_state=0),
+            'catboost': CatBoostClassifier(random_state=0, n_estimators=100, verbose=False),
             'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
             'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
             'gradient_boosting': GradientBoostingClassifier(random_state=0),
             'logistic_regression': LogisticRegression(random_state=0, n_jobs=-1)
         }
 
+        num_feat = kwargs['num_feat'] if kwargs['num_feat'] is not None else 15
+        step_value = math.ceil(len(
+            data.columns) / num_feat) if kwargs['step_value'] is None else kwargs['step_value']
+
         if 'model_list' in kwargs:
-            models = (kwargs['model_list'] if kwargs['model_list']
-                      [0].lower() != 'all' else model_list.keys())
+            models = (kwargs['model_list'] if kwargs['model_list'][0].lower(
+            ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                model = model_list.get(model_type).fit(data, target)
+                print(f'\t\tModel Type: {model_type}')
 
-                rfe_model = None
+                model = None
 
-                if 'num_feat' in kwargs:
-                    rfe_model = RFE(estimator=model, step=1,
-                                    n_features_to_select=kwargs['num_feat'], verbose=0).fit(data, target)
+                if model_type in model_list:
+                    model = model_list.get(model_type).fit(data, target)
                 else:
-                    rfe_model = RFE(estimator=model, step=1,
-                                    n_features_to_select=25, verbose=0).fit(data, target)
+                    raise EmptyModelList(
+                        f'No Model Type {model_type} in Model List.')
+
+                rfe_model = RFE(estimator=model, step=step_value,
+                                n_features_to_select=num_feat, verbose=False).fit(data, target)
 
                 data = data[data.columns[rfe_model.support_]]
-                data['target_label'] = target
-
-                rfe_impt_dict[model_type] = data.copy()
+                rfe_impt_dict[model_type] = list(data.columns)
 
         else:
-            model = RandomForestClassifier(random_state=0, n_jobs=-1)
-            rfe_model = None
-
-            if 'num_feat' in kwargs:
-                rfe_model = RFE(estimator=model, step=1,
-                                n_features_to_select=kwargs['num_feat'], verbose=0).fit(data, target)
-            else:
-                rfe_model = RFE(estimator=model, step=1,
-                                n_features_to_select=25, verbose=0).fit(data, target)
-
-            data = data[data.columns[rfe_model.support_]]
-            data['target_label'] = target
-
-            rfe_impt_dict['random_forest'] = data.copy()
+            raise EmptyModelList(
+                'No Model List Parameter in Key Word Arguments.')
 
         return rfe_impt_dict
 
@@ -400,55 +396,50 @@ class _Select_Methods:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
 
+        Raises:
+            EmptyModelList: No Model List Parameter in Key Word Arguments.
+            EmptyModelList: Specified Model Type not in List.
+
         Returns:
             pd.DataFrame: Feature Selected DataFrame.
         """
-
-        print(f'\n\tRunning Random Forest Feature Selection')
 
         mbi_feat = dict()
 
         model_list = {
             'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1),
             'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
-            'catboost': CatBoostClassifier(random_state=0),
+            'catboost': CatBoostClassifier(random_state=0, verbose=False, n_estimators=100),
             'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
         }
 
+        num_feat = kwargs['num_feat'] if kwargs['num_feat'] is not None else 15
+
         if 'model_list' in kwargs:
-            models = (kwargs['model_list'] if kwargs['model_list']
-                      [0].lower() != 'all' else model_list.keys())
+            models = (kwargs['model_list'] if kwargs['model_list'][0].lower(
+            ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                model = model_list.get(model_type).fit(data, target)
+                print(f'\t\tModel Type: {model_type}')
+
+                model = None
+
+                if model_type in model_list:
+                    model = model_list.get(model_type).fit(data, target)
+                else:
+                    raise EmptyModelList(
+                        f'No Model Type {model_type} in Model List.')
 
                 impt_df = pd.DataFrame({'feature': data.columns, 'avg_impt': model.feature_importances_}).sort_values(
                     by=['avg_impt'], ascending=False).reset_index(drop=True)
 
-                if 'num_feat' in kwargs:
-                    data = data[impt_df.iloc[:kwargs['num_feat']]
-                                ['feature'].values]
-                else:
-                    data = data[impt_df.iloc[:25]['feature'].values]
+                data = data[impt_df.iloc[:num_feat]['feature'].values]
 
-                data['target_label'] = target
-
-                mbi_feat[model_type] = data.copy()
+                mbi_feat[model_type] = list(data.columns)
 
         else:
-            model = RandomForestClassifier(random_state=0, n_jobs=-1)
-            impt_df = pd.DataFrame({'feature': data.columns, 'avg_impt': model.feature_importances_}).sort_values(
-                by=['avg_impt'], ascending=False).reset_index(drop=True)
-
-            if 'num_feat' in kwargs:
-                data = data[impt_df.iloc[:kwargs['num_feat']]
-                            ['feature'].values]
-            else:
-                data = data[impt_df.iloc[:25]['feature'].values]
-
-            data['target_label'] = target
-
-            mbi_feat['random_forest'] = data.copy()
+            raise EmptyModelList(
+                'No Model List Parameter in Key Word Arguments.')
 
         return mbi_feat
 
@@ -460,60 +451,51 @@ class _Select_Methods:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
 
+        Raises:
+            EmptyModelList: No Model List Parameter in Key Word Arguments.
+            EmptyModelList: Specified Model Type not in List.
+
         Returns:
             pd.DataFrame: Feature Selected DataFrame.
         """
 
-        print(f'\n\tRunning Lasso Feature Selection')
-
         reg_feat = dict()
 
         model_list = {
-            'lasso': LogisticRegression(penalty='l1', random_state=0, n_jobs=-1, C=0.1),
-            'ridge': RidgeClassifier(alpha=1.0, random_state=0, n_jobs=-1),
+            'lasso': LogisticRegression(penalty='l1', random_state=0, n_jobs=-1, C=0.1, solver='saga'),
+            'ridge': RidgeClassifier(alpha=1.0, random_state=0),
             'elasticnet': ElasticNet(alpha=1.0, l1_ratio=0.5, random_state=0)
         }
 
+        num_feat = kwargs['num_feat'] if kwargs['num_feat'] is not None else 15
+
         if 'model_list' in kwargs:
-            models = (kwargs['model_list'] if kwargs['model_list']
-                      [0].lower() != 'all' else model_list.keys())
+            models = (kwargs['model_list'] if kwargs['model_list'][0].lower(
+            ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                model = model_list.get(model_type)
+                print(f'\t\tModel Type: {model_type}')
 
-                selector = None
+                model = None
 
-                if 'num_feat' in kwargs:
-                    selector = SelectFromModel(
-                        estimator=model, max_features=kwargs['num_feat'], threshold=-np.inf).fit(data, target)
+                if model_type in model_list:
+                    model = model_list.get(model_type).fit(data, target)
                 else:
-                    selector = SelectFromModel(
-                        estimator=model, max_features=25, threshold=-np.inf).fit(data, target)
+                    raise EmptyModelList(
+                        f'No Model Type {model_type} in Model List.')
 
-                data = selector.transform(data)
-                data['target_label'] = target
+                selector = SelectFromModel(
+                    estimator=model, max_features=num_feat, threshold=-np.inf).fit(data, target)
 
-                reg_feat[model_type] = data.copy()
+                data = pd.DataFrame(data=selector.transform(
+                    data), columns=data.columns[selector.get_support()])
+                reg_feat[model_type] = list(data.columns)
 
         else:
-            model = LogisticRegression(
-                penalty='l1', random_state=0, n_jobs=-1, solver='saga', max_iter=1000, C=0.1)
+            raise EmptyModelList(
+                'No Model List Parameter in Key Word Arguments.')
 
-            selector = None
-
-            if 'num_feat' in kwargs:
-                selector = SelectFromModel(
-                    estimator=model, max_features=kwargs['num_feat'], threshold=-np.inf).fit(data, target)
-            else:
-                selector = SelectFromModel(
-                    estimator=model, max_features=25, threshold=-np.inf).fit(data, target)
-
-            data = selector.transform(data)
-            data['target_label'] = target
-
-            reg_feat['lasso'] = data.copy()
-
-        return data
+        return reg_feat
 
     @staticmethod
     def _boruta_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> pd.DataFrame:
@@ -523,17 +505,18 @@ class _Select_Methods:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
 
+        Raises:
+            EmptyModelList: No Model List Parameter in Key Word Arguments.
+            EmptyModelList: Specified Model Type not in List.
+
         Returns:
             pd.DataFrame: Feature Selected DataFrame.
         """
-
-        print(f'\n\tRunning Boruta RFC Feature Selection')
 
         boruta_impt_dict = dict()
 
         model_list = {
             'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1),
-            'catboost': CatBoostClassifier(random_state=0),
             'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
             'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
             'gradient_boosting': GradientBoostingClassifier(random_state=0),
@@ -541,31 +524,31 @@ class _Select_Methods:
         }
 
         if 'model_list' in kwargs:
-            models = (kwargs['model_list'] if kwargs['model_list']
-                      [0].lower() != 'all' else model_list.keys())
+            models = (kwargs['model_list'] if kwargs['model_list'][0].lower(
+            ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                model = model_list.get(model_type)
+                print(f'\t\tModel Type: {model_type}')
+
+                model = None
+
+                if model_type in model_list:
+                    model = model_list.get(model_type)
+                else:
+                    raise EmptyModelList(
+                        f'No Model Type {model_type} in Model List.')
 
                 boruta_model = BorutaPy(
-                    estimator=model, n_estimators='auto', verbose=0).fit(data.values, target)
+                    estimator=model, random_state=0, verbose=False).fit(data.values, target)
 
-                data = data[data.columns[boruta_model.support_].to_list(
+                selected_data = data[data.columns[boruta_model.support_].to_list(
                 ) + data.columns[boruta_model.support_weak_].to_list()]
-                data['target_label'] = target
 
-                boruta_impt_dict[model_type] = data.copy()
+                boruta_impt_dict[model_type] = list(selected_data.columns)
 
         else:
-            model = RandomForestClassifier(random_state=0, n_jobs=-1)
-            boruta_model = BorutaPy(
-                estimator=model, n_estimators='auto', verbose=0).fit(data.values, target)
-
-            data = data[data.columns[boruta_model.support_].to_list(
-            ) + data.columns[boruta_model.support_weak_].to_list()]
-            data['target_label'] = target
-
-            boruta_impt_dict['random_forest'] = data.copy()
+            raise EmptyModelList(
+                'No Model List Parameter in Key Word Arguments.')
 
         return boruta_impt_dict
 
@@ -576,36 +559,46 @@ class _Select_Methods:
         Args:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
-            file_name (str): File Path to Save Dataframe
+
+        Raises:
+            EmptyModelList: No Model List Parameter in Key Word Arguments.
+            EmptyModelList: Specified Model Type not in List.
 
         Returns:
             pd.DataFrame: Feature Selected DataFrame.
         """
 
-        print(f'\n\tRunning Sequencial Forward Selection')
-
         sfs_impt_dict = dict()
 
         model_list = {
             'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1),
-            'catboost': CatBoostClassifier(random_state=0),
+            'catboost': CatBoostClassifier(random_state=0, n_estimators=100, verbose=False),
             'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
             'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
             'gradient_boosting': GradientBoostingClassifier(random_state=0),
             'logistic_regression': LogisticRegression(random_state=0, n_jobs=-1)
         }
 
-        num_feat = 25 if 'num_feat' not in kwargs.key() else kwargs['num_feat']
+        num_feat = kwargs['num_feat'] if kwargs['num_feat'] is not None else 15
+        scoring_matric = kwargs['scoring_matric'] if kwargs['scoring_matric'] is not None else 'roc_auc'
 
         if 'model_list' in kwargs:
-            models = (kwargs['model_list'] if kwargs['model_list']
-                      [0].lower() != 'all' else model_list.keys())
+            models = (kwargs['model_list'] if kwargs['model_list'][0].lower(
+            ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                model = model_list.get(model_type).fit(data, target)
+                print(f'\t\tModel Type: {model_type}')
 
-                fs_model = sfs(model, k_features=num_feat, verbose=1, forward=True,
-                               scoring='roc_auc', cv=5, n_jobs=-1).fit(data, target)
+                model = None
+
+                if model_type in model_list:
+                    model = model_list.get(model_type).fit(data, target)
+                else:
+                    raise EmptyModelList(
+                        f'No Model Type {model_type} in Model List.')
+
+                fs_model = sfs(model, k_features=num_feat, verbose=False, forward=True,
+                               scoring=scoring_matric, cv=5, n_jobs=-1).fit(data, target)
 
                 metrics = fs_model.get_metric_dict()
                 cur_max, itr = 0, 0
@@ -619,35 +612,11 @@ class _Select_Methods:
                         print(f'Exception Was Raised: {e}')
 
                 feat_list = list(metrics[itr]['feature_names'])
-
-                data = data[list(feat_list)]
-                data['target_label'] = target
-
-                sfs_impt_dict[model_type] = data.copy()
+                sfs_impt_dict[model_type] = list(data[list(feat_list)].columns)
 
         else:
-            model = RandomForestClassifier(
-                random_state=0, n_jobs=-1).fit(data, target)
-            fs_model = sfs(model, k_features=num_feat, verbose=1, forward=True,
-                           scoring='roc_auc', cv=5, n_jobs=-1).fit(data, target)
-
-            metrics = fs_model.get_metric_dict()
-            cur_max, itr = 0, 0
-
-            for i in range(1, num_feat + 1):
-                try:
-                    if metrics[i]['avg_score'] > cur_max:
-                        cur_max, itr = metrics[i]['avg_score'], i
-
-                except Exception as e:
-                    print(f'Exception Was Raised: {e}')
-
-            feat_list = list(metrics[itr]['feature_names'])
-
-            data = data[list(feat_list)]
-            data['target_label'] = target
-
-            sfs_impt_dict['random_forest'] = data.copy()
+            raise EmptyModelList(
+                'No Model List Parameter in Key Word Arguments.')
 
         return sfs_impt_dict
 
@@ -857,7 +826,7 @@ class FeatureSelection:
             dict: Output Dataset with Selected Features.
         """
 
-        print('RUNNING: FEATURE SELECTION')
+        print('\nRUNNING: FEATURE SELECTION')
 
         feat_dict = dict()
 
@@ -876,22 +845,7 @@ class FeatureSelection:
 
         return feat_dict
 
-    def get_train_test_split_data(self, data_dict: dict, test_size: float = 0.2) -> None:
-        print('\nSplitting Data into Train and Test -')
-
-        for data_name, data_value in data_dict.items():
-            X = data_value.drop(columns=['target_label'])
-            y = data_value['target_label'].values
-
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=test_size, shuffle=True, stratify=y, random_state=0)
-
-            data_dict[data_name] = {
-                'X_train': X_train.copy(), 'X_test': X_test.copy(),
-                'y_train': y_train.copy(), 'y_test': y_test.copy()
-            }
-
-    def save_data(self, data_dict: object, path: str) -> None:
+    def save_data(self, meta_data: object, path: str) -> None:
         """Save the Dataset Pipeline
 
         Args:
@@ -901,7 +855,8 @@ class FeatureSelection:
 
         print('\nSaving Datasets...')
 
-        joblib.dump({'input_data': data_dict}, path)
+        joblib.dump({'process_type': path.split(
+            '/')[-1].split('.')[0], 'meta_data': meta_data}, path)
 
     def compile_selection(
         self, file_path: str, file_type: str, target_feature: str, test_size: float, save_path: str, drop_multicolliner_features: bool = True,
@@ -924,31 +879,32 @@ class FeatureSelection:
         data, target, encoder = self.read_data(
             file_path=file_path, file_type=file_type, target_feature=target_feature)
 
+        X_train, X_test, y_train, y_test = train_test_split(
+            data, target, test_size=test_size, shuffle=True, stratify=target, random_state=0)
+
+        saving_dict = {
+            'X_train': X_train.copy(), 'X_test': X_test.copy(), 'y_train': y_train, 'y_test': y_test, 'encoder': encoder
+        }
+
         if drop_low_variance_features:
-            data = self.drop_low_variance_features(
-                data=data, threshold=variance_thresh)
+            X_train = self.drop_low_variance_features(
+                data=X_train.copy(), threshold=variance_thresh)
 
         if drop_high_corr_features:
-            data = self.drop_high_correlated_features(
-                data=data, threshold=corr_threshold, corr_method=corr_method)
+            X_train = self.drop_high_correlated_features(
+                data=X_train.copy(), threshold=corr_threshold, corr_method=corr_method)
 
         if drop_multicolliner_features:
-            data = self.drop_multicolliner_features(data=data)
+            X_train = self.drop_multicolliner_features(data=X_train.copy())
 
         selection_dict = self.select_features(
-            data=data, target=target, conf=feature_select_conf)
-        # selection_dict = self.get_train_test_split_data(
-        #     data_dict=selection_dict, test_size=test_size)
+            data=X_train.copy(), target=y_train, conf=feature_select_conf)
 
-        # print('\nFinal Data Info. -')
+        saving_dict['selected_features'] = selection_dict
 
-        # for select_type, select_data in selection_dict.items():
-        #     print(
-        #         f'\tSelection Name: {select_type}, SHAPE: ROWS - {select_data["X_train"].shape[0]}, COLUMNS - {select_data["X_train"].shape[1]}')
+        self.save_data(data_dict=saving_dict, path=save_path)
 
-        # self.save_data(data_dict=selection_dict, path=save_path)
-
-        # print(f'\nData Transformation Finished\n{"-" * 100}')
+        print(f'\nData Transformation Finished\n{"-" * 100}')
 
         return selection_dict
 
@@ -971,29 +927,32 @@ if __name__ == '__main__':
         'drop_multicolliner_features': True,
 
         'feature_select_conf': [
-            {
-                'select_method': 'anova_f_value_selection',
-                'params': {
-                    'num_feat': 15
-                }
-            },
-            {
-                'select_method': 'mutual_info_classif_selection',
-                'params': {
-                    'num_feat': 15
-                }
-            },
-            {
-                'select_method': 'logit_selection',
-                'params': {
-                    'fit_method': None
-                }
-            },
+            # {
+            #     'select_method': 'anova_f_value_selection',
+            #     'params': {
+            #         'num_feat': 15
+            #     }
+            # },
+
+            # {
+            #     'select_method': 'mutual_info_classif_selection',
+            #     'params': {
+            #         'num_feat': 15
+            #     }
+            # },
+
+            # {
+            #     'select_method': 'logit_selection',
+            #     'params': {
+            #         'fit_method': None
+            #     }
+            # },
 
             # {
             #     'select_method': 'permutation_impt_selection',
             #     'params': {
-            #         'model_list': ['all']
+            #         'model_list': ['all'],
+            #         'num_feat': 15
             #     }
             # },
 
@@ -1001,16 +960,49 @@ if __name__ == '__main__':
             #     'select_method': 'recursive_feature_elimination',
             #     'params': {
             #         'model_list': ['all'],
-            #         'num_feat': 15
+            #         'num_feat': 15,
+            #         'step_value': None
             #     }
-            # }
+            # },
+
+            # {
+            #     'select_method': 'model_based_importance',
+            #     'params': {
+            #         'model_list': ['all'],
+            #         'num_feat': 15,
+            #     }
+            # },
+
+            # {
+            #     'select_method': 'regularization_selection',
+            #     'params': {
+            #         'model_list': ['all'],
+            #         'num_feat': 15,
+            #     }
+            # },
+
+            {
+                'select_method': 'boruta_selection',
+                'params': {
+                    'model_list': ['all'],
+                }
+            },
+
+            {
+                'select_method': 'sequencial_forward_selection',
+                'params': {
+                    'num_feat': 15,
+                    'scoring_metric': None
+                }
+            }
         ],
         'test_size': 0.2,
-        'save_path': '../data/interim_data/feature_selected_data_v1.joblib'
+        'save_path': './data/feature_selected_data_v1.joblib'
     }
 
     feature_selection = FeatureSelection().compile_selection(**config)
 
     import json
 
-    print(f'\n{json.dumps(feature_selection, indent=4)}')
+    with open('feat_select.json', 'w') as file:
+        file.write(json.dumps(feature_selection, indent=4))
