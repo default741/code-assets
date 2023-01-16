@@ -14,6 +14,8 @@ from mlxtend.feature_selection import SequentialFeatureSelector as sfs
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
 from xgboost import XGBClassifier
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 
 import joblib
 import warnings
@@ -183,15 +185,16 @@ class _Utils:
 class _Select_Methods:
 
     @staticmethod
-    def _anova_f_value_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
+    def _anova_f_value_selection(data: pd.DataFrame, target: pd.DataFrame, kwargs: dict) -> tuple:
         """Feature Selection Method using ANOVA-F Value
 
         Args:
             data (pd.DataFrame): Input Data
             target (pd.DataFrame): Target Data
+            kwargs (dict): Extra Key-Word Arguments
 
         Returns:
-            dict: Selected Features Dictionary
+            tuple: Selected Features Dictionary with the Function Name
         """
 
         num_feat = kwargs['num_feat'] if kwargs['num_feat'] is not None else 15
@@ -203,18 +206,19 @@ class _Select_Methods:
         feature_list = feature_list[feature_list['anova_f_pvalues'] > 0.05].sort_values(by=[
                                                                                         'anova_f_values'])
 
-        return {'anova_f_value': list(data[feature_list['features'].iloc[:num_feat]].columns)}
+        return ({'anova_f_value': list(data[feature_list['features'].iloc[:num_feat]].columns)}, 'anova_f_value_selection')
 
     @staticmethod
-    def _mutual_info_classif_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
+    def _mutual_info_classif_selection(data: pd.DataFrame, target: pd.DataFrame, kwargs: dict) -> tuple:
         """Feature Selection Method using Mutual Information Classifier
 
         Args:
             data (pd.DataFrame): Input Data
             target (pd.DataFrame): Target Data
+            kwargs (dict): Extra Key-Word Arguments
 
         Returns:
-            dict: Selected Features Dictionary
+            tuple: Selected Features Dictionary with the Function Name
         """
 
         num_feat = kwargs['num_feat'] if kwargs['num_feat'] is not None else 15
@@ -226,21 +230,22 @@ class _Select_Methods:
         feature_list = feature_list[feature_list['mutual_info'] > 0].sort_values(by=[
                                                                                  'mutual_info'])
 
-        return {'mutual_info_classif': list(data[feature_list['features'].iloc[:num_feat]].columns)}
+        return ({'mutual_info_classif': list(data[feature_list['features'].iloc[:num_feat]].columns)}, 'mutual_info_classif_selection')
 
     @staticmethod
-    def _logit_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
+    def _logit_selection(data: pd.DataFrame, target: pd.DataFrame, kwargs: dict) -> tuple:
         """Selection Feature Using Logit Model.
 
         Args:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
+            kwargs (dict): Extra Key-Word Arguments
 
         Raises:
             FeatureDropException: All Features Dropped.
 
         Returns:
-            dict: Feature Selected DataFrame.
+            tuple: Selected Features Dictionary with the Function Name
         """
 
         p_values = None
@@ -267,22 +272,23 @@ class _Select_Methods:
             else:
                 p_values = _Utils._calculate_pvalues(data=data, target=target)
 
-        return {'logit': list(data.columns)}
+        return ({'logit': list(data.columns)}, 'logit_selection')
 
     @staticmethod
-    def _permutation_impt_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> dict:
+    def _permutation_impt_selection(data: pd.DataFrame, target: pd.DataFrame, kwargs: dict) -> tuple:
         """Feature Selection Using Permutation Importance with Random Forest Model.
 
         Args:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
+            kwargs (dict): Extra Key-Word Arguments
 
         Raises:
             EmptyModelList: No Model List Parameter in Key Word Arguments.
             EmptyModelList: Specified Model Type not in List.
 
         Returns:
-            dict: Feature Selected DataFrame.
+            tuple: Selected Features Dictionary with the Function Name
         """
 
         perm_impt_dict = dict()
@@ -303,8 +309,6 @@ class _Select_Methods:
             ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                print(f'\t\tModel Type: {model_type}')
-
                 model = None
 
                 if model_type in model_list:
@@ -328,22 +332,23 @@ class _Select_Methods:
             raise EmptyModelList(
                 'No Model List Parameter in Key Word Arguments.')
 
-        return perm_impt_dict
+        return (perm_impt_dict, 'permutation_impt_selection')
 
     @staticmethod
-    def _recursive_feature_elimination(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> pd.DataFrame:
+    def _recursive_feature_elimination(data: pd.DataFrame, target: pd.DataFrame, kwargs: dict) -> tuple:
         """Selection Feature Using Recursive Feature Elimination with Random Forest Model. Number of features defaults to 25.
 
         Args:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
+            kwargs (dict): Extra Key-Word Arguments
 
         Raises:
             EmptyModelList: No Model List Parameter in Key Word Arguments.
             EmptyModelList: Specified Model Type not in List.
 
         Returns:
-            pd.DataFrame: Feature Selected DataFrame.
+            tuple: Selected Features Dictionary with the Function Name
         """
 
         rfe_impt_dict = dict()
@@ -366,8 +371,6 @@ class _Select_Methods:
             ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                print(f'\t\tModel Type: {model_type}')
-
                 model = None
 
                 if model_type in model_list:
@@ -386,22 +389,23 @@ class _Select_Methods:
             raise EmptyModelList(
                 'No Model List Parameter in Key Word Arguments.')
 
-        return rfe_impt_dict
+        return (rfe_impt_dict, 'recursive_feature_elimination')
 
     @staticmethod
-    def _model_based_importance(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> pd.DataFrame:
+    def _model_based_importance(data: pd.DataFrame, target: pd.DataFrame, kwargs: dict) -> tuple:
         """Selection Feature Using Random Forest Model's Feature Importance.
 
         Args:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
+            kwargs (dict): Extra Key-Word Arguments
 
         Raises:
             EmptyModelList: No Model List Parameter in Key Word Arguments.
             EmptyModelList: Specified Model Type not in List.
 
         Returns:
-            pd.DataFrame: Feature Selected DataFrame.
+            tuple: Selected Features Dictionary with the Function Name
         """
 
         mbi_feat = dict()
@@ -420,8 +424,6 @@ class _Select_Methods:
             ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                print(f'\t\tModel Type: {model_type}')
-
                 model = None
 
                 if model_type in model_list:
@@ -441,22 +443,23 @@ class _Select_Methods:
             raise EmptyModelList(
                 'No Model List Parameter in Key Word Arguments.')
 
-        return mbi_feat
+        return (mbi_feat, 'model_based_importance')
 
     @staticmethod
-    def _regularization_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> pd.DataFrame:
+    def _regularization_selection(data: pd.DataFrame, target: pd.DataFrame, kwargs: dict) -> tuple:
         """Selection Feature Using Lasso Feature Selection.
 
         Args:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
+            kwargs (dict): Extra Key-Word Arguments
 
         Raises:
             EmptyModelList: No Model List Parameter in Key Word Arguments.
             EmptyModelList: Specified Model Type not in List.
 
         Returns:
-            pd.DataFrame: Feature Selected DataFrame.
+            tuple: Selected Features Dictionary with the Function Name
         """
 
         reg_feat = dict()
@@ -474,8 +477,6 @@ class _Select_Methods:
             ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                print(f'\t\tModel Type: {model_type}')
-
                 model = None
 
                 if model_type in model_list:
@@ -495,22 +496,23 @@ class _Select_Methods:
             raise EmptyModelList(
                 'No Model List Parameter in Key Word Arguments.')
 
-        return reg_feat
+        return (reg_feat, 'regularization_selection')
 
     @staticmethod
-    def _boruta_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> pd.DataFrame:
+    def _boruta_selection(data: pd.DataFrame, target: pd.DataFrame, kwargs: dict) -> tuple:
         """Selection Feature Using Boruta with Random Forest Model.
 
         Args:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
+            kwargs (dict): Extra Key-Word Arguments
 
         Raises:
             EmptyModelList: No Model List Parameter in Key Word Arguments.
             EmptyModelList: Specified Model Type not in List.
 
         Returns:
-            pd.DataFrame: Feature Selected DataFrame.
+            tuple: Selected Features Dictionary with the Function Name
         """
 
         boruta_impt_dict = dict()
@@ -520,7 +522,6 @@ class _Select_Methods:
             'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
             'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
             'gradient_boosting': GradientBoostingClassifier(random_state=0),
-            'logistic_regression': LogisticRegression(random_state=0, n_jobs=-1)
         }
 
         if 'model_list' in kwargs:
@@ -528,8 +529,6 @@ class _Select_Methods:
             ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                print(f'\t\tModel Type: {model_type}')
-
                 model = None
 
                 if model_type in model_list:
@@ -550,45 +549,42 @@ class _Select_Methods:
             raise EmptyModelList(
                 'No Model List Parameter in Key Word Arguments.')
 
-        return boruta_impt_dict
+        return (boruta_impt_dict, 'boruta_selection')
 
     @staticmethod
-    def _sequencial_forward_selection(data: pd.DataFrame, target: pd.DataFrame, **kwargs) -> pd.DataFrame:
+    def _sequencial_forward_selection(data: pd.DataFrame, target: pd.DataFrame, kwargs: dict) -> tuple:
         """Selection Feature Using Sequencial Forward Selection with Random Forest Model.
 
         Args:
             data (pd.DataFrame): Input Data
             target (np.array): Target Data
+            kwargs (dict): Extra Key-Word Arguments
 
         Raises:
             EmptyModelList: No Model List Parameter in Key Word Arguments.
             EmptyModelList: Specified Model Type not in List.
 
         Returns:
-            pd.DataFrame: Feature Selected DataFrame.
+            tuple: Selected Features Dictionary with the Function Name
         """
 
         sfs_impt_dict = dict()
 
         model_list = {
             'random_forest': RandomForestClassifier(random_state=0, n_jobs=-1),
-            'catboost': CatBoostClassifier(random_state=0, n_estimators=100, verbose=False),
             'xgboost': XGBClassifier(random_state=0, n_jobs=-1),
             'lightgbm': LGBMClassifier(random_state=0, n_jobs=-1),
             'gradient_boosting': GradientBoostingClassifier(random_state=0),
-            'logistic_regression': LogisticRegression(random_state=0, n_jobs=-1)
         }
 
         num_feat = kwargs['num_feat'] if kwargs['num_feat'] is not None else 15
-        scoring_matric = kwargs['scoring_matric'] if kwargs['scoring_matric'] is not None else 'roc_auc'
+        scoring_metric = kwargs['scoring_metric'] if kwargs['scoring_metric'] is not None else 'roc_auc'
 
         if 'model_list' in kwargs:
             models = (kwargs['model_list'] if kwargs['model_list'][0].lower(
             ) != 'all' and kwargs['model_list'] != [] else model_list.keys())
 
             for model_type in models:
-                print(f'\t\tModel Type: {model_type}')
-
                 model = None
 
                 if model_type in model_list:
@@ -598,7 +594,7 @@ class _Select_Methods:
                         f'No Model Type {model_type} in Model List.')
 
                 fs_model = sfs(model, k_features=num_feat, verbose=False, forward=True,
-                               scoring=scoring_matric, cv=5, n_jobs=-1).fit(data, target)
+                               scoring=scoring_metric, cv=5, n_jobs=-1).fit(data, target)
 
                 metrics = fs_model.get_metric_dict()
                 cur_max, itr = 0, 0
@@ -618,7 +614,7 @@ class _Select_Methods:
             raise EmptyModelList(
                 'No Model List Parameter in Key Word Arguments.')
 
-        return sfs_impt_dict
+        return (sfs_impt_dict, 'sequencial_forward_selection')
 
 
 class FeatureSelection:
@@ -837,11 +833,74 @@ class FeatureSelection:
 
             if method_name in self._selection_methods.keys():
                 feat_dict[method_name] = self._selection_methods[method_name](
-                    data.copy(), target, **select_method['params'])
+                    data.copy(), target, select_method['params'])
 
             else:
                 raise InvalidSelectionMethod(
                     'Invalid Feature Selection Method.')
+
+        return feat_dict
+
+    @staticmethod
+    def complete_callback(future_obj: object) -> None:
+        """Completion Callback Function
+
+        Args:
+            future_obj (object): Future Object with Function Pools
+            func_name (str): Function Name
+        """
+
+        if future_obj.done():
+            print(f"\tMethod Name: {future_obj.result()[1]} - COMPLETED.")
+
+    def parallel_select_features(self, data: pd.DataFrame, target: np.array, conf: list) -> dict:
+        """Runs Feature Selection Pipeline to get the optimal features for Modelling.
+
+        Args:
+            data (pd.DataFrame): Input Data.
+            target (np.array): Target Data
+            conf (list): Configuration for Feature Selection.
+
+        Raises:
+            InvalidSelectionMethod: Invalid Feature Selection Method.
+
+        Returns:
+            dict: Output Dataset with Selected Features.
+        """
+
+        print('\nRUNNING: PARALLEL FEATURE SELECTION')
+
+        feat_dict: dict = dict()
+        select_function_list: list = list()
+
+        for select_method in conf:
+            method_name = select_method['select_method']
+
+            print(f'\tMethod Name: {method_name}')
+
+            if method_name in self._selection_methods.keys():
+                select_function_list.append(
+                    (self._selection_methods[method_name], (data.copy(), target, select_method['params'])))
+
+            else:
+                raise InvalidSelectionMethod(
+                    'Invalid Feature Selection Method.')
+
+        func_futures: list = list()
+
+        print('\nSTATUS: PARALLEL FEATURE SELECTION')
+
+        with ThreadPoolExecutor() as executor:
+            for select_func, params in select_function_list:
+                future_obj = executor.submit(select_func, *params)
+                future_obj.add_done_callback(
+                    FeatureSelection.complete_callback)
+
+                func_futures.append(future_obj)
+
+        for func_result in func_futures:
+            selected_feat_dict, func_name = func_result.result()
+            feat_dict[func_name] = selected_feat_dict
 
         return feat_dict
 
@@ -853,7 +912,7 @@ class FeatureSelection:
             path (str): Saving Path
         """
 
-        print('\nSaving Datasets...')
+        print('\nSAVING JOBLIB FILE (WITH DATA AND FEATURES)...')
 
         joblib.dump({'process_type': path.split(
             '/')[-1].split('.')[0], 'meta_data': meta_data}, path)
@@ -861,7 +920,7 @@ class FeatureSelection:
     def compile_selection(
         self, file_path: str, file_type: str, target_feature: str, test_size: float, save_path: str, drop_multicolliner_features: bool = True,
         drop_low_variance_features: bool = True, variance_thresh: float = 0.5, feature_select_conf: list = [], drop_high_corr_features: bool = True,
-        corr_threshold: float = 0.7, corr_method: str = 'pearson'
+        corr_threshold: float = 0.7, corr_method: str = 'pearson', run_parallel: bool = True
     ) -> dict:
         """Compile and Runs the Feature Selection Pipeline
 
@@ -871,10 +930,14 @@ class FeatureSelection:
             target_feature (str): Target Label
             test_size (float): Test Size Percentage
             save_path (str): Path to save Pipeline
+            drop_multicolliner_features (bool): To Drop Multicollinear Features or Not.
+            drop_low_variance_features (bool): To Drop Low Variance Features or Not.
 
         Returns:
             dict: Final Data Dict
         """
+
+        print(f'\nData Transformation Started.\n')
 
         data, target, encoder = self.read_data(
             file_path=file_path, file_type=file_type, target_feature=target_feature)
@@ -897,14 +960,20 @@ class FeatureSelection:
         if drop_multicolliner_features:
             X_train = self.drop_multicolliner_features(data=X_train.copy())
 
-        selection_dict = self.select_features(
-            data=X_train.copy(), target=y_train, conf=feature_select_conf)
+        selection_dict = dict()
+
+        if run_parallel:
+            selection_dict = self.parallel_select_features(
+                data=X_train.copy(), target=y_train, conf=feature_select_conf)
+        else:
+            selection_dict = self.select_features(
+                data=X_train.copy(), target=y_train, conf=feature_select_conf)
 
         saving_dict['selected_features'] = selection_dict
 
-        self.save_data(data_dict=saving_dict, path=save_path)
+        self.save_data(meta_data=saving_dict, path=save_path)
 
-        print(f'\nData Transformation Finished\n{"-" * 100}')
+        print(f'\nData Transformation Finished.\n{"-" * 100}')
 
         return selection_dict
 
@@ -916,6 +985,7 @@ if __name__ == '__main__':
         'file_path': './data/transformed_data_v1.csv',
         'file_type': 'csv',
         'target_feature': 'target_label',
+        'run_parallel': True,
 
         'drop_low_variance_features': True,
         'variance_thresh': 0.3,
@@ -927,70 +997,71 @@ if __name__ == '__main__':
         'drop_multicolliner_features': True,
 
         'feature_select_conf': [
-            # {
-            #     'select_method': 'anova_f_value_selection',
-            #     'params': {
-            #         'num_feat': 15
-            #     }
-            # },
+            {
+                'select_method': 'anova_f_value_selection',
+                'params': {
+                    'num_feat': 15
+                }
+            },
 
-            # {
-            #     'select_method': 'mutual_info_classif_selection',
-            #     'params': {
-            #         'num_feat': 15
-            #     }
-            # },
+            {
+                'select_method': 'mutual_info_classif_selection',
+                'params': {
+                    'num_feat': 15
+                }
+            },
 
-            # {
-            #     'select_method': 'logit_selection',
-            #     'params': {
-            #         'fit_method': None
-            #     }
-            # },
+            {
+                'select_method': 'logit_selection',
+                'params': {
+                    'fit_method': None
+                }
+            },
 
-            # {
-            #     'select_method': 'permutation_impt_selection',
-            #     'params': {
-            #         'model_list': ['all'],
-            #         'num_feat': 15
-            #     }
-            # },
+            {
+                'select_method': 'permutation_impt_selection',
+                'params': {
+                    'model_list': ['all'],
+                    'num_feat': 15
+                }
+            },
 
-            # {
-            #     'select_method': 'recursive_feature_elimination',
-            #     'params': {
-            #         'model_list': ['all'],
-            #         'num_feat': 15,
-            #         'step_value': None
-            #     }
-            # },
+            {
+                'select_method': 'recursive_feature_elimination',
+                'params': {
+                    'model_list': ['all'],
+                    'num_feat': 15,
+                    'step_value': None
+                }
+            },
 
-            # {
-            #     'select_method': 'model_based_importance',
-            #     'params': {
-            #         'model_list': ['all'],
-            #         'num_feat': 15,
-            #     }
-            # },
+            {
+                'select_method': 'model_based_importance',
+                'params': {
+                    'model_list': ['all'],
+                    'num_feat': 15,
+                }
+            },
 
-            # {
-            #     'select_method': 'regularization_selection',
-            #     'params': {
-            #         'model_list': ['all'],
-            #         'num_feat': 15,
-            #     }
-            # },
+            {
+                'select_method': 'regularization_selection',
+                'params': {
+                    'model_list': ['all'],
+                    'num_feat': 15,
+                }
+            },
 
             {
                 'select_method': 'boruta_selection',
                 'params': {
-                    'model_list': ['all'],
+                    'model_list': ['random_forest', 'lightgbm'],
                 }
             },
 
             {
                 'select_method': 'sequencial_forward_selection',
                 'params': {
+                    'model_list': ['random_forest', 'lightgbm'],
                     'num_feat': 15,
                     'scoring_metric': None
                 }
