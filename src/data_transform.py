@@ -1,9 +1,8 @@
 # Custom Data Transformation Class Asset to be Used for any Future Projects - v0.2
 
 # Author: Abdemanaaf Ghadiali
-# Copyright: Copyright 2022, Data_Transform, https://HowToBeBoring.com
-# Version: 0.0.2
-# Email: abdemanaaf.ghadiali.1998@gmail.com
+# Copyright: Copyright 2023, Data_Transform, https://data-transform.com
+# Version: 0.2
 # Status: Development
 # Code Style: PEP8 Style Guide
 # MyPy Status: NA (Not Tested)
@@ -20,14 +19,32 @@ from sklearn.ensemble import IsolationForest  # type: ignore
 from typing import Union
 
 import joblib
+import os
 
 import pandas as pd
 import numpy as np
 
 
+class FilePathNotValid(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
+class EmptyDataframeObject(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+
+
 class _Read_Data_File:
-    """Protected class to Read Data with respect to its File Type. Currently Supports
-    three file types namely CSV, EXCEL (xlsx), Parquet.
+    """The purpose of this class is to provide a protected way to read data from different file types such as CSV, EXCEL (xlsx), and Parquet.
+
+    How to Use:
+        data_file = _Read_Data_File()
+        params = {'sep': ',', 'header': 0, 'index_col': 0}
+        df = data_file._read_csv_type('path/to/file.csv', params)
+
+    Requirements:
+        This class requires the 'pandas' library to be imported. The class uses the functions provided by pandas to read the file data.
 
     Methods:
         _read_csv_type: Reads CSV file type
@@ -37,87 +54,124 @@ class _Read_Data_File:
 
     @staticmethod
     def _read_csv_type(file_path: str, params: dict) -> pd.DataFrame:
-        """Reads CSV file type using Pandas Library (read_csv).
+        """Used to read and import data from a CSV (Comma Separated Values) file. This function takes the file path of the CSV file as its
+        input and returns a DataFrame object.
 
         Args:
-            file_path (str): Path to read the file from.
-            params (dict): Extra Parameters for the Method
+            file_path (str): The path refers to the location of the file on a computer or network, in order to specify where the file should be read from.
+            params (dict): Dictionary that contains extra parameters to pass to the underlying pandas function that is used to read the file.
+
+        Raises:
+            FilePathNotValid: The specified file path is not valid.
 
         Returns:
-            pd.DataFrame: Raw Data File
+            pd.DataFrame: A raw data file that contains unprocessed, original data in its native format, without any manipulation or modification.
         """
+
+        # Checks if the file path is valid or not.
+        if not (os.path.exists(file_path) and os.path.isfile(file_path)):
+            raise FilePathNotValid(f'{file_path} is not a valid file path.')
+
         return pd.read_csv(file_path, **params)
 
     @staticmethod
     def _read_excel_type(file_path: str, params: dict) -> pd.DataFrame:
-        """Reads XLSX file type using Pandas Library (read_excel).
+        """Used to read and import data from a EXCEL file. This function takes the file path of the EXCEL file as its
+        input and returns a DataFrame object.
 
         Args:
-            file_path (str): Path to read the file from.
-            params (dict): Extra Parameters for the Method
+            file_path (str): The path refers to the location of the file on a computer or network, in order to specify where the file should be read from.
+            params (dict): Dictionary that contains extra parameters to pass to the underlying pandas function that is used to read the file.
+
+        Raises:
+            FilePathNotValid: The specified file path is not valid.
 
         Returns:
-            pd.DataFrame: Raw Data File
+            pd.DataFrame: A raw data file that contains unprocessed, original data in its native format, without any manipulation or modification.
         """
+
+        # Checks if the file path is valid or not.
+        if not (os.path.exists(file_path) and os.path.isfile(file_path)):
+            raise FilePathNotValid(f'{file_path} is not a valid file path.')
+
         return pd.read_excel(file_path, **params)
 
     @staticmethod
     def _read_parquet_type(file_path: str, params: dict) -> pd.DataFrame:
-        """Reads Parquet file type using Pandas Library (read_parquet).
+        """Used to read and import data from a Parquet file. This function takes the file path of the Parquet file as its
+        input and returns a DataFrame object.
 
         Args:
-            file_path (str): Path to read the file from.
-            params (dict): Extra Parameters for the Method
+            file_path (str): The path refers to the location of the file on a computer or network, in order to specify where the file should be read from.
+            params (dict): Dictionary that contains extra parameters to pass to the underlying pandas function that is used to read the file.
+
+        Raises:
+            FilePathNotValid: The specified file path is not valid.
 
         Returns:
-            pd.DataFrame: Raw Data File
+            pd.DataFrame: A raw data file that contains unprocessed, original data in its native format, without any manipulation or modification.
         """
+
+        # Checks if the file path is valid or not.
+        if not (os.path.exists(file_path) and os.path.isfile(file_path)):
+            raise FilePathNotValid(f'{file_path} is not a valid file path.')
+
         return pd.read_parquet(file_path, **params)
 
 
 class _Utils:
-    """Utility Class for Helper Functions
+    """Utility Class for Helper Functions: These methods are intended to be used as helper functions inside the class to make it
+    more readable and maintainable. The underscore prefix indicates that it is intended for internal use rather than for external use.
+
+    How to Use:
+        data_file = _Utils()
+        df = _Utils._filter_numeric_columns(dataframe_object)
+
+    Requirements:
+        This class requires the 'pandas' library to be imported. The class uses the functions provided by pandas to filter features based on their type.
 
     Methods:
-        _filter_numeric_columns: Filters Numeric Type Columns
-        _filter_categorical_columns: Filters Categorical Type Columns
+        _filter_numeric_columns: This method is used to filter the numeric type columns from a given dataset.
+        _filter_categorical_columns: This method is used to filter the categorical type columns from a given dataset.
     """
 
     @staticmethod
     def _filter_numeric_columns(data: pd.DataFrame) -> pd.DataFrame:
-        """Filter Numeric Columns from Dataset.
+        """This method is used to filter the numeric type columns from a given dataset.
 
         Args:
-            data (pd.DataFrame): Input Data
+            data (pd.DataFrame): A raw data file that contains unprocessed, original data in its native format, without any manipulation or modification.
 
         Raises:
-            ValueError: If Dataframe is empty
+            EmptyDataframeObject: Raises an exception if the Dataframe passed is empty. This is to ensure that the method is not applied on an empty dataset.
 
         Returns:
-            pd.DataFrame: Numeric Columns Dataset
+            pd.DataFrame: Returns a Dataframe containing only the numeric type columns of the input dataset.
         """
 
+        # Checks if the dataframe object is not empty.
         if data.empty:
-            raise ValueError('Dataframe is Empty.')
+            raise EmptyDataframeObject('Dataframe is Empty.')
 
         return data.select_dtypes(include=['float64', 'int64', 'uint8'])
 
     @staticmethod
     def _filter_categorical_columns(data: pd.DataFrame) -> pd.DataFrame:
-        """Filter Categorical Columns from Dataset.
+        """This method is used to filter the categorical type columns from a given dataset.
 
         Args:
-            data (pd.DataFrame): Input Data
+            data (pd.DataFrame): A raw data file that contains unprocessed, original data in its native format, without any manipulation or modification.
 
         Raises:
-            ValueError: If Dataframe is empty
+            EmptyDataframeObject: Raises an exception if the Dataframe passed is empty. This is to ensure that the method is not applied on an empty dataset.
 
         Returns:
-            pd.DataFrame: Categorical Columns Dataset
+            pd.DataFrame: returns a Dataframe containing only the object type columns of the input dataset.
         """
 
+        # Checks if the dataframe object is not empty.
         if data.empty:
-            raise ValueError('Dataframe is Empty.')
+            raise EmptyDataframeObject('Dataframe is Empty.')
 
         return data.select_dtypes(include='object')
 
@@ -137,14 +191,17 @@ class _Transform_Pipeline:
             """Class Initialization Method.
 
             Args:
-                custom_columns_list (list): Custom List of Features given by the User. Defaults to [].
+                custom_columns_list (Union[list, tuple], optional): Custom List of Features given by the User. Defaults to [].
+
+            Raises:
+                TypeError: _description_
             """
 
             if not isinstance(custom_columns_list, (list, tuple)):
                 raise TypeError(
                     'Columns List should be either a List or a Tuple.')
 
-            self.custom_columns_list = custom_columns_list
+            self.custom_columns_list: list = custom_columns_list
 
         def fit(self, X: pd.DataFrame, y: np.ndarray = np.ndarray(shape=0)) -> object:
             """Fit the class wrt. the given data.
@@ -171,7 +228,7 @@ class _Transform_Pipeline:
             if len(self.custom_columns_list) == 0:
                 return X.reset_index(drop=True)
 
-            if all(feat in list(X.columns) for feat in self.custom_columns_list):
+            if not all(feat in list(X.columns) for feat in self.custom_columns_list):
                 raise TypeError(
                     'Missing Features from Dataframe specified in Custom List.')
 
