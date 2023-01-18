@@ -274,7 +274,7 @@ class _Transform_Pipeline:
             """
 
             self.drop_cols = [i for i in X.columns if (
-                X[i].isna().mean() >= self.null_percent_threshold)]
+                X[i].isna().mean() > self.null_percent_threshold)]
 
             return self
 
@@ -335,7 +335,7 @@ class _Transform_Pipeline:
                     X[i].dropna().nunique() <= self.unique_value_threshold)]
             else:
                 self.drop_cols = [i for i in X.columns if (
-                    X[i].dropna().nunique() / X[i].count() <= self.unique_value_threshold)]
+                    X[i].dropna().nunique() / X[i].count() < self.unique_value_threshold)]
 
             return self
 
@@ -381,8 +381,6 @@ class _Transform_Pipeline:
                 raise TypeError('Invalid Imputation Method.')
 
             self.imputation_method = imputation_method
-
-            self.imputer = None
             self.feature_list = None
 
         def fit(self, X: pd.DataFrame, y: np.ndarray = np.ndarray(shape=0)):
@@ -439,8 +437,6 @@ class _Transform_Pipeline:
                 raise TypeError('Invalid Scaling Method.')
 
             self.scaling_method = scaling_method
-
-            self.scaler = None
             self.feature_list = None
 
         def fit(self, X: pd.DataFrame, y: np.ndarray = np.ndarray(shape=0)):
@@ -451,7 +447,7 @@ class _Transform_Pipeline:
                 y (np.ndarray): Target Data. Defaults to np.ndarray(shape=0)
             """
 
-            self.feature_list = X.columns.values
+            self.feature_list = list(X.columns.values)
 
             self.scaler = self.SCALING_LIST[self.scaling_method]
             self.scaler.fit(X)
@@ -495,8 +491,6 @@ class _Transform_Pipeline:
                 raise TypeError('Invalid Transforming Method.')
 
             self.transforming_method = transforming_method
-
-            self.transformer = None
             self.feature_list = None
 
         def fit(self, X: pd.DataFrame, y: np.ndarray = np.ndarray(shape=0)):
@@ -507,7 +501,7 @@ class _Transform_Pipeline:
                 y (np.ndarray): Target Data. Defaults to np.ndarray(shape=0)
             """
 
-            self.feature_list = X.columns.values
+            self.feature_list = list(X.columns.values)
 
             self.transformer = self.TRANSFORMING_LIST[self.transforming_method]
             self.transformer.fit(X)
@@ -584,6 +578,10 @@ class DataTransform:
 
         except Exception as E:
             print(f'File Type Mismatch. {E}')
+
+        if target_feature not in raw_data.columns:
+            raise ValueError(
+                f'Target Feature ({target_feature}) not in Index.')
 
         input_data = raw_data.drop(columns=[target_feature])
         target_data = raw_data[target_feature].values
