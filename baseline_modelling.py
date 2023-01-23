@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.metrics import make_scorer, fbeta_score
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
@@ -220,6 +220,37 @@ class BaselineModelling:
 
         return results
 
+    def run_voting_classifier(
+        self, X_train: pd.DataFrame, y_train: np.ndarray, feature_list: list, model_list: list, sample_list: list = None, balanced: bool = True
+    ) -> None:
+
+        results = list()
+
+        print('\nRUNNING VOTING CLASSIFIER:')
+
+        for select_feature in feature_list:
+            estimators_list: list = list()
+
+            if balanced:
+                estimators_list = [(f'{model_name}', self.get_pipeline(sample_name=None, model_name=model_name, balanced=balanced))
+                                   for model_name in model_list]
+
+            else:
+                estimators_list = [(f'{model_name}-{sample_name}', self.get_pipeline(sample_name=sample_name, model_name=model_name, balanced=balanced))
+                                   for model_name in model_list for sample_name in sample_list]
+
+            voting_classifier = VotingClassifier(
+                estimators=estimators_list, voting='soft')
+
+            splits = StratifiedKFold(n_splits=5, random_state=0, shuffle=True)
+            cv_result = cross_validate(
+                voting_classifier, X_train[feature_list[select_feature]], y_train, cv=splits, scoring=_Utils._get_scorers(), n_jobs=-1)
+
+            results.append(self.get_results(cv_results=cv_result,
+                                            run_name=f'{select_feature}?{",".join(sample_list)}?{",".join(model_list)}', balanced=balanced))
+
+        return results
+
     def save_results(self, results: list, sort_by: list, save_path: dict) -> None:
         """Save the Baseline Excel and the Best Results as a Joblib file.
 
@@ -243,7 +274,7 @@ class BaselineModelling:
 
     def compile_baseline(
         self, file_path: str, balanced_data: bool, check_imbalance: bool, imbalance_class: int, imbalance_threshold: float, kpi_sorting: list,
-        save_path: dict
+        save_path: dict, enable_voting: bool, voting_model_list: list, voting_sample_list: list = []
     ) -> None:
         """Compiles all the Methods to run the Baseline Modelling.
 
@@ -269,15 +300,39 @@ class BaselineModelling:
         feature_list = {f'{outer_key}-{inner_key}': feat_list for outer_key,
                         outer_value in selected_features.items() for inner_key, feat_list in outer_value.items()}
 
+        # ------------Temp-------------------
+        f = ['permutation_impt_selection-random_forest',
+             'permutation_impt_selection-catboost',
+             'permutation_impt_selection-xgboost',
+             'permutation_impt_selection-lightgbm',
+             'permutation_impt_selection-gradient_boosting',
+             'permutation_impt_selection-logistic_regression']
+
+        feature_list_temp = {}
+
+        for i in feature_list.keys():
+            if i in f:
+                feature_list_temp[i] = feature_list[i]
+
+        feature_list = feature_list_temp
+
+        # ------------Temp-------------------
+
         if check_imbalance:
             balanced = self.check_imbalance(
-                target=y_train, imbalance_class=imbalance_class)
+                target=y_train, imbalance_class=imbalance_class, imbalance_threshold=imbalance_threshold)
 
         pnc_list = self.get_pnc_list(feature_sets=list(
             feature_list.keys()), balanced=balanced)
 
         results = self.run_baseline_parallel(
             X_train=X_train, y_train=y_train, pnc_list=pnc_list, feature_list=feature_list, balanced=balanced)
+
+        if enable_voting:
+            voting_results = self.run_voting_classifier(X_train=X_train, y_train=y_train, feature_list=feature_list,
+                                                        model_list=voting_model_list, sample_list=voting_sample_list, balanced=balanced)
+
+            results += voting_results
 
         self.save_results(
             results=results, sort_by=kpi_sorting, save_path=save_path)
@@ -291,10 +346,14 @@ if __name__ == '__main__':
     config = {
         'file_path': './data/feature_selected_data_v1.joblib',
 
-        'balanced_data': False,
+        'balanced_data': True,
         'check_imbalance': True,
         'imbalance_class': 1,
         'imbalance_threshold': 0.1,
+
+        'enable_voting': True,
+        'voting_model_list': ['random_forest', 'lightgbm'],
+        'voting_sample_list': [],
 
         'kpi_sorting': ['roc_auc'],
         'save_path': {
