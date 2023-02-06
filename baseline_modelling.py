@@ -84,28 +84,28 @@ class BaselineModelling:
         """
 
         self._sampling_methods = {
-            'smote (up)': SMOTE(random_state=0, n_jobs=-1),
-            # 'adasyn (up)': ADASYN(random_state=0, n_jobs=-1),
-            # 'svm_smote (up)': SVMSMOTE(random_state=0, n_jobs=-1),
-            # 'boderline_smote (up)': BorderlineSMOTE(random_state=0, n_jobs=-1),
-            # 'k_means_smote (up)': KMeansSMOTE(random_state=0, n_jobs=-1),
+            'smote (up)': SMOTE(random_state=0),
+            'adasyn (up)': ADASYN(random_state=0),
+            'svm_smote (up)': SVMSMOTE(random_state=0),
+            'boderline_smote (up)': BorderlineSMOTE(random_state=0),
+            'k_means_smote (up)': KMeansSMOTE(random_state=0),
 
-            # 'near_miss (down)': NearMiss(sampling_strategy='majority', n_jobs=-1),
-            # 'renn (down)': RepeatedEditedNearestNeighbours(sampling_strategy='majority', n_jobs=-1),
-            # 'tomek_links (down)': TomekLinks(sampling_strategy='majority', n_jobs=-1),
+            'near_miss (down)': NearMiss(sampling_strategy='majority'),
+            'renn (down)': RepeatedEditedNearestNeighbours(sampling_strategy='majority'),
+            'tomek_links (down)': TomekLinks(sampling_strategy='majority'),
 
-            # 'smote_tomek (combine)': SMOTETomek(random_state=0, n_jobs=-1),
-            # 'smote_enn (combine)': SMOTEENN(random_state=0, n_jobs=-1)
+            'smote_tomek (combine)': SMOTETomek(random_state=0),
+            'smote_enn (combine)': SMOTEENN(random_state=0)
         }
 
         self._models = {
             'random_forest': RandomForestClassifier,
-            # 'gradient_boosting': GradientBoostingClassifier,
-            # 'xgboost': XGBClassifier,
+            'gradient_boosting': GradientBoostingClassifier,
+            'xgboost': XGBClassifier,
             'lightgbm': LGBMClassifier,
-            # 'logistic_regression': LogisticRegression,
-            # 'svm_rbf': SVC,
-            # 'mlp_classifier': MLPClassifier
+            'logistic_regression': LogisticRegression,
+            'svm_rbf': SVC,
+            'mlp_classifier': MLPClassifier
         }
 
     def load_data_pickle(self, file_path: str) -> dict:
@@ -229,6 +229,8 @@ class BaselineModelling:
         print('\nRUNNING VOTING CLASSIFIER:')
 
         for select_feature in feature_list:
+            print(f'\t\t{select_feature}')
+
             estimators_list: list = list()
 
             if balanced:
@@ -238,6 +240,8 @@ class BaselineModelling:
             else:
                 estimators_list = [(f'{model_name}-{sample_name}', self.get_pipeline(sample_name=sample_name, model_name=model_name, balanced=balanced))
                                    for model_name in model_list for sample_name in sample_list]
+
+                print(estimators_list)
 
             voting_classifier = VotingClassifier(
                 estimators=estimators_list, voting='soft')
@@ -300,24 +304,6 @@ class BaselineModelling:
         feature_list = {f'{outer_key}-{inner_key}': feat_list for outer_key,
                         outer_value in selected_features.items() for inner_key, feat_list in outer_value.items()}
 
-        # ------------Temp-------------------
-        f = ['permutation_impt_selection-random_forest',
-             'permutation_impt_selection-catboost',
-             'permutation_impt_selection-xgboost',
-             'permutation_impt_selection-lightgbm',
-             'permutation_impt_selection-gradient_boosting',
-             'permutation_impt_selection-logistic_regression']
-
-        feature_list_temp = {}
-
-        for i in feature_list.keys():
-            if i in f:
-                feature_list_temp[i] = feature_list[i]
-
-        feature_list = feature_list_temp
-
-        # ------------Temp-------------------
-
         if check_imbalance:
             balanced = self.check_imbalance(
                 target=y_train, imbalance_class=imbalance_class, imbalance_threshold=imbalance_threshold)
@@ -346,14 +332,14 @@ if __name__ == '__main__':
     config = {
         'file_path': './data/feature_selected_data_v1.joblib',
 
-        'balanced_data': True,
-        'check_imbalance': True,
+        'balanced_data': False,
+        'check_imbalance': False,
         'imbalance_class': 1,
         'imbalance_threshold': 0.1,
 
         'enable_voting': True,
         'voting_model_list': ['random_forest', 'lightgbm'],
-        'voting_sample_list': [],
+        'voting_sample_list': ['smote (up)'],
 
         'kpi_sorting': ['roc_auc'],
         'save_path': {
